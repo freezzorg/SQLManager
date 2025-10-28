@@ -36,7 +36,7 @@ After=network.target
 
 [Service]
 User=sql
-Group=sql
+Group="пользователи домена"
 WorkingDirectory=/opt/SQLManager
 ExecStart=/opt/SQLManager/sqlmanager
 Restart=always
@@ -49,4 +49,21 @@ WantedBy=multi-user.target
 sudo systemctl daemon-reload
 sudo systemctl enable sqlmanager.service
 sudo systemctl start sqlmanager.service
+```
+
+## Устранение ошибок
+
+Если при запуске приложения возникает ошибка типа:
+```bash
+./sqlmanager: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by ./sqlmanager)
+./sqlmanager: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.32' not found (required by ./sqlmanager)
+```
+то это говорит о том, что мы собираем исполняемый файл Go на более новой версии операционной системы
+(или в контейнере с более новой версией GLIBC), а затем пытаетесь запустить его на целевом сервере с более старой версией GLIBC (GNU C Library).
+
+Необходимо,
+- либо собрать проект в версии операционной системе, используемой на сервере,
+- либо собрать проект, используя статическую компиляцию Go
+```bash
+CGO_ENABLED=0 go build -ldflags="-s -w -extldflags=-static -X main.version=1.0.0" -a -tags netgo -o sqlmanager
 ```
