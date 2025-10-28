@@ -161,10 +161,7 @@ func handleGetBackups(w http.ResponseWriter, r *http.Request) {
 
     // 1. Монтирование SMB-шары
     mountPoint := appConfig.SMBShare.LocalMountPoint
-    remotePath := appConfig.SMBShare.RemotePath
-    domain := appConfig.SMBShare.Domain
-    user := appConfig.SMBShare.User
-    password := appConfig.SMBShare.Password
+    remotePath := appConfig.SMBShare.RemotePath // remotePath все еще нужен для логирования
 
     // Создаем точку монтирования, если ее нет
     if _, err := os.Stat(mountPoint); os.IsNotExist(err) {
@@ -175,22 +172,27 @@ func handleGetBackups(w http.ResponseWriter, r *http.Request) {
         }
     }
 
-    // Проверяем, смонтирована ли уже шара
-    mountCheckCmd := exec.Command("findmnt", "-M", mountPoint)
-    if err := mountCheckCmd.Run(); err != nil { // Если не смонтирована, монтируем
-        LogInfo(fmt.Sprintf("Монтирование SMB-шары %s на %s...", remotePath, mountPoint))
-        mountCmd := exec.Command("sudo", "mount", "-t", "cifs",
-            fmt.Sprintf("//%s", strings.ReplaceAll(remotePath, "\\", "/")),
-            mountPoint,
-            "-o", fmt.Sprintf("username=%s\\%s,password=%s,domain=%s,vers=3.0,uid=%d,gid=%d", domain, user, password, domain, os.Getuid(), os.Getgid())) // uid/gid для доступа текущего пользователя
-        
-        output, err := mountCmd.CombinedOutput()
+    // Проверяем, смонтирована ли уже шара с помощью systemd
+    if !checkMountStatus(mountPoint) {
+        LogInfo(fmt.Sprintf("SMB-шара %s не смонтирована на %s. Попытка перемонтирования через systemctl...", remotePath, mountPoint))
+        // Имя unit-файла systemd для монтирования
+        mountUnitName := strings.ReplaceAll(mountPoint[1:], "/", "-") + ".mount" // /mnt/sql_backups -> mnt-sql_backups.mount
+        cmd := exec.Command("sudo", "systemctl", "start", mountUnitName)
+        output, err := cmd.CombinedOutput()
         if err != nil {
-            LogError(fmt.Sprintf("Ошибка монтирования SMB-шары: %v\n%s", err, string(output)))
-            http.Error(w, "Ошибка сервера при монтировании SMB-шары", http.StatusInternalServerError)
+            LogError(fmt.Sprintf("Ошибка systemctl start %s: %v, Output: %s", mountUnitName, err, string(output)))
+            http.Error(w, "Ошибка сервера при перемонтировании SMB-шары", http.StatusInternalServerError)
             return
         }
-        LogInfo(fmt.Sprintf("SMB-шара %s успешно смонтирована на %s.", remotePath, mountPoint))
+        // Даем системе время на монтирование (может занять несколько секунд)
+        time.Sleep(3 * time.Second) 
+
+        if !checkMountStatus(mountPoint) {
+            LogError(fmt.Sprintf("Повторное монтирование %s не удалось после systemctl start.", mountPoint))
+            http.Error(w, "Ошибка сервера: перемонтирование SMB-шары не удалось.", http.StatusInternalServerError)
+            return
+        }
+        LogInfo(fmt.Sprintf("SMB-шара %s успешно перемонтирована на %s через systemctl.", remotePath, mountPoint))
     } else {
         LogDebug(fmt.Sprintf("SMB-шара %s уже смонтирована на %s.", remotePath, mountPoint))
     }
@@ -307,6 +309,19 @@ func handleGetBackups(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(backupFiles)
     LogDebug("Список бэкапов отправлен.")
+}
+
+// Проверяет, примонтирована ли указанная точка монтирования.
+func checkMountStatus(mountPoint string) bool {
+    // Используем команду mountpoint -q (quiet) для проверки
+    // Команда возвращает 0, если примонтировано, 1, если нет.
+    cmd := exec.Command("mountpoint", "-q", mountPoint)
+    
+    // Если cmd.Run() возвращает nil, это значит, что код выхода 0 (успех)
+    if cmd.Run() == nil {
+        return true
+    }
+    return false
 }
 
 // API для отмены восстановления (удаление базы в состоянии RESTORING) [cite: 29]

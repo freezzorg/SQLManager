@@ -19,6 +19,10 @@ sudo mount -t cifs \
   -o username=sql,password=sql,domain=kcep,vers=3.0,uid=mssql,gid=mssql,file_mode=0660,dir_mode=0770 \
   //veeamsrv.kcep.local/backup$/mssql /mnt/sql_backups
 ```
+- Добавить пользователя sql в группу mssql, что бы приложение могло читать данные их шары:
+```bash
+sudo usermod -aG mssql sql
+```
 
 - Настроить sudo для sql, чтобы SQLManager мог выполнять mount и umount без пароля:
 ```bash
