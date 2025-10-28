@@ -1,0 +1,14 @@
+[Unit]
+Description=Web SQL Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/pwsh -File /opt/web-sql/web-sql.ps1
+Restart=always
+User=sql
+#Group="пользователи домена"
+WorkingDirectory=/opt/web-sql/
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+[Install]
+WantedBy=multi-user.target

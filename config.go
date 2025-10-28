@@ -21,11 +21,12 @@ type Config struct {
         Password        string `yaml:"password"`
     } `yaml:"smb_share"`
     App struct {
-        BindAddress string `yaml:"bind_address"`
-        LogFile     string `yaml:"log_file"`
-        LogLevel    string `yaml:"log_level"`
+        BindAddress string   `yaml:"bind_address"`
+        LogFile     string   `yaml:"log_file"`
+        LogLevel    string   `yaml:"log_level"`
+        BackupBlacklist []string `yaml:"backup_blacklist"` // Черный список бэкапов
     } `yaml:"app"`
-    Whitelist []string `yaml:"whitelist"`
+    Whitelist []string `yaml:"whitelist"` // Белый список IP-адресов
 }
 
 // Структура для отображения базы данных в веб-интерфейсе
