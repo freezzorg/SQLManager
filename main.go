@@ -76,7 +76,9 @@ func setupDBConnection(cfg struct {
 // Запускает веб-сервер
 func startWebServer(addr string) {
     // Настройка маршрутов
-    http.HandleFunc("/", handleIndex)
+    // Обслуживание статических файлов из директории "static"
+    http.Handle("/", http.FileServer(http.Dir("./static")))
+    // API маршруты
     http.HandleFunc("/api/databases", authMiddleware(handleGetDatabases)) // Получение списка БД [cite: 9]
     http.HandleFunc("/api/delete", authMiddleware(handleDeleteDatabase)) // Удаление БД [cite: 18, 7]
     http.HandleFunc("/api/backups", authMiddleware(handleGetBackups)) // Получение списка бэкапов [cite: 21, 12]
@@ -86,7 +88,6 @@ func startWebServer(addr string) {
 
     LogInfo(fmt.Sprintf("Веб-сервер запущен на %s", addr))
     
-    // На самом деле, systemd будет отвечать за автоматический запуск [cite: 6]
     if err := http.ListenAndServe(addr, nil); err != nil {
         LogError(fmt.Sprintf("Ошибка запуска веб-сервера: %v", err))
     }

@@ -18,7 +18,7 @@ smb_share:
 # Настройки приложения и безопасности
 app:
   bind_address: "0.0.0.0:8080"
-  log_file: "/var/log/sqlmanager/app.log" # Путь к файлу логов [cite: 15]
+  log_file: "/var/log/sqlmanager/sqlmanager.log" # Путь к файлу логов [cite: 15]
   log_level: "DEBUG" # Уровень логирования (INFO, ERROR, DEBUG) [cite: 17]
   backup_blacklist: # Черный список бэкапов
     - "-=NoUsedBaseBackups=-"

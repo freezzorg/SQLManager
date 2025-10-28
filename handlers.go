@@ -26,7 +26,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
         // Проверка IP в белом списке
         isAllowed := false
         for _, allowed := range appConfig.Whitelist {
-            if allowed == ip { // Проверка только IP
+            if allowed == ip {
                 isAllowed = true
                 break
             }
@@ -41,11 +41,6 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
         // Продолжаем выполнение, если разрешено
         next.ServeHTTP(w, r)
     }
-}
-
-// Отдает основную HTML-страницу (должна быть загружена из файла)
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-    http.ServeFile(w, r, "static/index.html") // Предполагаем, что index.html находится в папке static
 }
 
 // API для получения списка баз данных [cite: 9, 10]

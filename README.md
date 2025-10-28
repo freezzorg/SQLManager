@@ -13,11 +13,18 @@ sudo chown -R sql:"пользователи домена" /mnt/sql_backups
 sudo chmod -R 750 /mnt/sql_backups
 ```
 
+- Настроить /etc/fstab для монтирования windows-шары при загрузке сервера:
+```bash
+sudo mount -t cifs \
+  -o username=sql,password=sql,domain=kcep,vers=3.0,uid=mssql,gid=mssql,file_mode=0660,dir_mode=0770 \
+  //veeamsrv.kcep.local/backup$/mssql /mnt/sql_backups
+```
+
 - Настроить sudo для sql, чтобы SQLManager мог выполнять mount и umount без пароля:
 ```bash
 sudo visudo
 
-sql ALL=(ALL) NOPASSWD: /usr/bin/mount -t cifs *
+sql ALL=(ALL) NOPASSWD: /bin/mount -t cifs *
 ````
 
 - Ручной запуск:
