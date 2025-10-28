@@ -214,6 +214,20 @@ func handleGetBackups(w http.ResponseWriter, r *http.Request) {
             continue
         }
         fileName := file.Name()
+
+        // Проверка на черный список
+        isBlacklisted := false
+        for _, blName := range appConfig.App.BackupBlacklist {
+            if strings.Contains(fileName, blName) {
+                isBlacklisted = true
+                LogDebug(fmt.Sprintf("Файл бэкапа '%s' находится в черном списке и будет пропущен.", fileName))
+                break
+            }
+        }
+        if isBlacklisted {
+            continue
+        }
+
         if strings.HasSuffix(fileName, ".bak") || strings.HasSuffix(fileName, ".diff") || strings.HasSuffix(fileName, ".trn") {
             fullPath := filepath.Join(mountPoint, fileName)
             
@@ -229,55 +243,50 @@ func handleGetBackups(w http.ResponseWriter, r *http.Request) {
             var backupDate time.Time
             var backupType string
             
-            // Сканирование только нужных полей (BackupFinishDate, BackupType)
-            // RESTORE HEADERONLY возвращает много полей, нужно выбрать нужные по индексу или по имени
-            // Для простоты, предположим, что BackupFinishDate - это 12-е поле, а BackupType - 4-е (Full=1, Diff=2, Log=5)
-            // В реальном приложении лучше использовать динамическое сканирование или структуру с тегами.
-            
-            // Пример:
-            // Position 4: BackupType (1=Database, 2=Differential, 5=Log)
-            // Position 12: BackupFinishDate
-            
-            // Для корректного сканирования всех полей, нужно объявить переменные для всех полей
-            // или использовать sql.RawBytes и выбрать нужные.
-            // Здесь упрощенный подход, который может быть хрупким при изменении версии SQL Server.
-            
-            // Временные переменные для сканирования всех полей
-            var (
-                backupName, backupDescription, serverName, databaseName string
-                databaseVersion, compatibilityLevel, recoveryModel int
-                backupTypeInt, compressed, position int
-                deviceName, databaseCreationDate, expirationDate, backupFinishDate time.Time // Добавлено backupFinishDate
-                firstLSN, lastLSN, checkpointLSN, databaseBackupLSN string
-                softwareVendorID, softwareVersionMajor, softwareVersionMinor, softwareVersionBuild int
-                machineName, flags, bindingID, recoveryForkID string
-                firstRecoveryForkID, lastRecoveryForkID string
-                isDamaged, hasBulkLoggedData, isSnapshot, isReadOnly, isSingleUser, hasBackupChecksums bool
-                isContinuation, isAfterLog, isCopyOnly, firstRecoveryForkGUID, lastRecoveryForkGUID string
-                containerID, familyGUID, differentialBaseLSN, differentialBaseGUID string
-                isEncrypted, encryptorType, compressionAlgorithm string
-            )
+            // Используем структуру для более надежного сканирования заголовка бэкапа
+            var header struct {
+                BackupType       int       `sql:"BackupType"`
+                BackupFinishDate time.Time `sql:"BackupFinishDate"`
+            }
+
+            // Для сканирования полей по имени, нужно использовать обертку или кастомный сканер.
+            // В данном случае, для простоты, будем сканировать все поля в интерфейсы, а затем выбирать нужные.
+            // Это менее эффективно, но более надежно, чем позиционное сканирование.
+            columns, err := rows.Columns()
+            if err != nil {
+                LogWarning(fmt.Sprintf("Ошибка получения имен столбцов для заголовка бэкапа %s: %v", fileName, err))
+                continue
+            }
+
+            values := make([]interface{}, len(columns))
+            valuePtrs := make([]interface{}, len(columns))
+            for i := range columns {
+                valuePtrs[i] = &values[i]
+            }
 
             if rows.Next() {
-                err := rows.Scan(
-                    &backupName, &backupDescription, &backupTypeInt, &expirationDate, &compressed,
-                    &position, &deviceName, &serverName, &databaseName, &databaseVersion,
-                    &databaseCreationDate, &backupFinishDate, &firstLSN, &lastLSN, &checkpointLSN,
-                    &databaseBackupLSN, &softwareVendorID, &softwareVersionMajor, &softwareVersionMinor,
-                    &softwareVersionBuild, &machineName, &flags, &bindingID, &recoveryForkID,
-                    &firstRecoveryForkID, &lastRecoveryForkID, &isDamaged, &hasBulkLoggedData,
-                    &isSnapshot, &isReadOnly, &isSingleUser, &hasBackupChecksums, &isContinuation,
-                    &isAfterLog, &isCopyOnly, &firstRecoveryForkGUID, &lastRecoveryForkGUID,
-                    &containerID, &familyGUID, &differentialBaseLSN, &differentialBaseGUID,
-                    &isEncrypted, &encryptorType, &compressionAlgorithm, &compatibilityLevel,
-                    &recoveryModel,
-                )
+                err := rows.Scan(valuePtrs...)
                 if err != nil {
                     LogWarning(fmt.Sprintf("Ошибка сканирования заголовка бэкапа %s: %v", fileName, err))
                     continue
                 }
-                backupDate = backupFinishDate
-                switch backupTypeInt {
+
+                // Поиск нужных полей по имени
+                for i, colName := range columns {
+                    switch colName {
+                    case "BackupType":
+                        if val, ok := values[i].(int64); ok {
+                            header.BackupType = int(val)
+                        }
+                    case "BackupFinishDate":
+                        if val, ok := values[i].(time.Time); ok {
+                            header.BackupFinishDate = val
+                        }
+                    }
+                }
+                
+                backupDate = header.BackupFinishDate
+                switch header.BackupType {
                 case 1:
                     backupType = ".bak" // Full
                 case 2:
