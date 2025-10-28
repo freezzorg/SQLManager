@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Manager</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .container { max-width: 900px; margin: auto; background: #f9f9f9; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .section { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #fff; }
+        .section h2 { margin-top: 0; color: #555; }
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #0056b3; }
+        input[type="text"], input[type="password"], input[type="datetime-local"] {
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 200px;
+        }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .log-entry { border-bottom: 1px dotted #eee; padding: 5px 0; }
+        .log-entry:last-child { border-bottom: none; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .info { color: green; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SQL Manager Web Interface</h1>
+
+        <div class="section">
+            <h2>Databases</h2>
+            <button onclick="getDatabases()">Refresh Databases</button>
+            <table id="databasesTable">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>State</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Databases will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Backups</h2>
+            <button onclick="getBackups()">Refresh Backups</button>
+            <table id="backupsTable">
+                <thead>
+                    <tr>
+                        <th>File Name</th>
+                        <th>Type</th>
+                        <th>Backup Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Backups will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Restore Database</h2>
+            <input type="text" id="restoreBackupPath" placeholder="Backup File Path (e.g., /mnt/sql_backups/db.bak)">
+            <input type="text" id="restoreNewDBName" placeholder="New Database Name">
+            <input type="datetime-local" id="restoreTime" title="Restore to specific point in time (optional)">
+            <button onclick="restoreDatabase()">Restore</button>
+        </div>
+
+        <div class="section">
+            <h2>Application Log</h2>
+            <button onclick="getBriefLog()">Refresh Log</button>
+            <div id="appLog">
+                <!-- Log entries will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "/api";
+
+        async function fetchData(url, method = 'GET', body = null) {
+            const options = { method };
+            if (body) {
+                options.headers = { 'Content-Type': 'application/json' };
+                options.body = JSON.stringify(body);
+            }
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            return response.json();
+        }
+
+        async function getDatabases() {
+            try {
+                const databases = await fetchData(`${API_BASE}/databases`);
+                const tableBody = document.getElementById('databasesTable').getElementsByTagName('tbody')[0];
+                tableBody.innerHTML = '';
+                databases.forEach(db => {
+                    const row = tableBody.insertRow();
+                    row.insertCell(0).textContent = db.name;
+                    row.insertCell(1).textContent = db.state;
+                    const actionsCell = row.insertCell(2);
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.textContent = 'Delete';
+                    deleteBtn.onclick = () => deleteDatabase(db.name);
+                    actionsCell.appendChild(deleteBtn);
+                });
+                logMessage(`Loaded ${databases.length} databases.`, 'info');
+            } catch (error) {
+                logMessage(`Error loading databases: ${error.message}`, 'error');
+            }
+        }
+
+        async function deleteDatabase(dbName) {
+            if (!confirm(`Are you sure you want to delete database '${dbName}'? This action is irreversible.`)) {
+                return;
+            }
+            try {
+                await fetchData(`${API_BASE}/delete?name=${dbName}`, 'DELETE');
+                logMessage(`Database '${dbName}' deleted successfully.`, 'info');
+                getDatabases(); // Refresh list
+            } catch (error) {
+                logMessage(`Error deleting database '${dbName}': ${error.message}`, 'error');
+            }
+        }
+
+        async function getBackups() {
+            try {
+                const backups = await fetchData(`${API_BASE}/backups`);
+                const tableBody = document.getElementById('backupsTable').getElementsByTagName('tbody')[0];
+                tableBody.innerHTML = '';
+                backups.forEach(backup => {
+                    const row = tableBody.insertRow();
+                    row.insertCell(0).textContent = backup.fileName;
+                    row.insertCell(1).textContent = backup.type;
+                    row.insertCell(2).textContent = new Date(backup.backupDate).toLocaleString();
+                    const actionsCell = row.insertCell(3);
+                    const restoreBtn = document.createElement('button');
+                    restoreBtn.textContent = 'Restore';
+                    restoreBtn.onclick = () => {
+                        document.getElementById('restoreBackupPath').value = backup.fileName;
+                        document.getElementById('restoreNewDBName').value = backup.fileName.split('.')[0]; // Suggest DB name
+                    };
+                    actionsCell.appendChild(restoreBtn);
+                });
+                logMessage(`Loaded ${backups.length} backup files.`, 'info');
+            } catch (error) {
+                logMessage(`Error loading backups: ${error.message}`, 'error');
+            }
+        }
+
+        async function restoreDatabase() {
+            const backupPath = document.getElementById('restoreBackupPath').value;
+            const newDbName = document.getElementById('restoreNewDBName').value;
+            const restoreTime = document.getElementById('restoreTime').value;
+
+            if (!backupPath || !newDbName) {
+                alert("Backup Path and New Database Name are required.");
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to restore '${backupPath}' to '${newDbName}'? This may overwrite an existing database.`)) {
+                return;
+            }
+
+            try {
+                const body = {
+                    backupPath: backupPath,
+                    newDbName: newDbName,
+                    restoreTime: restoreTime ? new Date(restoreTime).toLocaleString('ru-RU', {
+                        year: 'numeric', month: '2-digit', day: '2-digit',
+                        hour: '2-digit', minute: '2-digit', second: '2-digit',
+                        hour12: false
+                    }).replace(',', '') : "" // Format to "DD.MM.YYYY HH:MM:SS"
+                };
+                await fetchData(`${API_BASE}/restore`, 'POST', body);
+                logMessage(`Restore of '${newDbName}' from '${backupPath}' initiated. Check log for progress.`, 'info');
+                getDatabases(); // Refresh list
+            } catch (error) {
+                logMessage(`Error initiating restore: ${error.message}`, 'error');
+            }
+        }
+
+        async function getBriefLog() {
+            try {
+                const logEntries = await fetchData(`${API_BASE}/log`);
+                const logDiv = document.getElementById('appLog');
+                logDiv.innerHTML = '';
+                logEntries.forEach(entry => {
+                    const p = document.createElement('p');
+                    p.className = 'log-entry';
+                    p.textContent = `${new Date(entry.timestamp).toLocaleString()}: ${entry.message}`;
+                    if (entry.message.startsWith('ОШИБКА')) {
+                        p.classList.add('error');
+                    } else if (entry.message.startsWith('WARNING')) {
+                        p.classList.add('warning');
+                    } else {
+                        p.classList.add('info');
+                    }
+                    logDiv.appendChild(p);
+                });
+                logDiv.scrollTop = logDiv.scrollHeight; // Scroll to bottom
+            } catch (error) {
+                logMessage(`Error loading log: ${error.message}`, 'error');
+            }
+        }
+
+        function logMessage(message, type = 'info') {
+            const logDiv = document.getElementById('appLog');
+            const p = document.createElement('p');
+            p.className = `log-entry ${type}`;
+            p.textContent = `${new Date().toLocaleString()}: ${message}`;
+            logDiv.appendChild(p);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        // Initial load
+        document.addEventListener('DOMContentLoaded', () => {
+            getDatabases();
+            getBackups();
+            getBriefLog();
+            setInterval(getBriefLog, 5000); // Refresh log every 5 seconds
+        });
+    </script>
+</body>
+</html>
