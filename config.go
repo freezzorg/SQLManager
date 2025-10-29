@@ -35,14 +35,13 @@ type Database struct {
     State      string `json:"state"` // Состояние базы (online, offline, restoring, error)
 }
 
-// Структура для отображения бэкапа
+// Структура для отображения бэкапа (используется для списка директорий)
 type BackupFile struct {
-    FileName  string       `json:"fileName"`
-    // Type      string       `json:"type"` // .bak, .diff, .trn [cite: 4] - Удаляем, так как для списка директорий не нужен
-    // BackupDate sql.NullTime `json:"backupDate"` // Дата и время из метаданных [cite: 14], может быть NULL - Удаляем
+    // BaseName - имя директории бэкапа (например, "Edelweis")
+    BaseName  string `json:"baseName"` 
 }
 
-// Структура для краткого лога действий [cite: 16]
+// Структура для краткого лога действий (используется в logging.go)
 type LogEntry struct {
     Timestamp time.Time `json:"timestamp"`
     Message   string    `json:"message"`

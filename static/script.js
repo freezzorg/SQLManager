@@ -122,12 +122,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         backups.forEach(backup => {
-            const { fileName } = backup; // Деструктуризация
-            console.log('Деструктурированные данные бэкапа:', { fileName }); // Добавлено логирование
+            const { baseName } = backup; // <-- ИСПРАВЛЕНО: Деструктуризация на 'baseName'
+            console.log('Деструктурированные данные бэкапа:', { baseName }); // Добавлено логирование
             
             const option = document.createElement('option');
-            option.value = fileName; // Имя директории (название базы)
-            option.appendChild(document.createTextNode(fileName)); // Используем createTextNode
+            option.value = baseName; // Имя директории (название базы)
+            option.appendChild(document.createTextNode(baseName)); // <-- ИСПРАВЛЕНО: используем baseName
             backupSelect.appendChild(option);
         });
     }
@@ -154,11 +154,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function startRestoreProcess() {
-        const backupPath = backupSelect.value;
+        // Имя директории бэкапа
+        const backupBaseName = backupSelect.value; // <-- Имя переменной в JS должно быть baseName или backupBaseName
         const newDbName = newDbNameInput.value.trim();
-        let restoreTime = restoreDatetimeInput.value;
+        let restoreDateTime = restoreDatetimeInput.value;
 
-        if (!backupPath) {
+        if (!backupBaseName) {
             alert('Пожалуйста, выберите файл бэкапа.');
             return;
         }
@@ -167,11 +168,20 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Форматируем дату/время для Go-бэкенда
-        if (restoreTime) {
-            const dt = new Date(restoreTime);
-            restoreTime = `${dt.getDate().toString().padStart(2, '0')}.${(dt.getMonth() + 1).toString().padStart(2, '0')}.${dt.getFullYear()} ${dt.getHours().toString().padStart(2, '0')}:${dt.getMinutes().toString().padStart(2, '0')}:${dt.getSeconds().toString().padStart(2, '0')}`;
+        // Форматируем дату/время для Go-бэкенда (DD.MM.YYYY HH:MM:SS)
+        if (restoreDateTime) {
+            const dt = new Date(restoreDateTime);
+            
+            // Проверка, что дата корректна
+            if (isNaN(dt)) {
+                alert('Неверный формат даты/времени для восстановления.');
+                return;
+            }
+            
+            // Форматируем в DD.MM.YYYY HH:MM:SS
+            restoreDateTime = `${dt.getDate().toString().padStart(2, '0')}.${(dt.getMonth() + 1).toString().padStart(2, '0')}.${dt.getFullYear()} ${dt.getHours().toString().padStart(2, '0')}:${dt.getMinutes().toString().padStart(2, '0')}:${dt.getSeconds().toString().padStart(2, '0')}`;
         }
+
 
         try {
             const response = await fetch('/api/restore', {
@@ -180,9 +190,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    backupPath: backupPath,
+                    backupBaseName: backupBaseName, // <-- Передаем как baseName
                     newDbName: newDbName,
-                    restoreTime: restoreTime,
+                    restoreDateTime: restoreDateTime,
                 }),
             });
 

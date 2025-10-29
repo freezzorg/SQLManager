@@ -8,15 +8,14 @@ import (
 	"os"
 	"sync"
 
-	// Используем стандартный драйвер для MSSQL
 	_ "github.com/denisenkom/go-mssqldb"
 	"gopkg.in/yaml.v3"
 )
 
 var appConfig Config
 var dbConn *sql.DB
-var logMutex sync.Mutex // Мьютекс для безопасной записи в лог-файл
-var briefLog []LogEntry // Краткий лог для веб-интерфейса [cite: 16]
+var logMutex sync.Mutex // Мьютекс для безопасной записи в лог-файл (используется в logging.go)
+var briefLog []LogEntry // Краткий лог для веб-интерфейса (используется в logging.go)
 
 // Главная функция, запускающая приложение
 func main() {
@@ -25,20 +24,19 @@ func main() {
         log.Fatalf("Ошибка загрузки конфигурации: %v", err)
     }
 
-    // 2. Настройка логирования в файл [cite: 15, 17]
+    // 2. Настройка логирования в файл (функция определена в logging.go)
     setupLogger(appConfig.App.LogFile, appConfig.App.LogLevel)
     
     // 3. Установка подключения к MSSQL
     var err error
     dbConn, err = setupDBConnection(appConfig.MSSQL)
     if err != nil {
-        // Мы используем LogError, который пишет и в файл, и в консоль
         LogError(fmt.Sprintf("Ошибка подключения к SQL Server (%s): %v", appConfig.MSSQL.Server, err))
         return
     }
     LogInfo("Успешное подключение к SQL Server.")
 
-    // 4. Запуск веб-сервера (для systemd и ручного запуска) [cite: 6]
+    // 4. Запуск веб-сервера
     startWebServer(appConfig.App.BindAddress)
 }
 
@@ -57,7 +55,7 @@ func setupDBConnection(cfg struct {
 	Port     int    `yaml:"port"`
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
-	RestorePath string `yaml:"restore_path"` // Добавляем RestorePath
+	RestorePath string `yaml:"restore_path"` 
 }) (*sql.DB, error) {
 	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d",
 		cfg.Server, cfg.User, cfg.Password, cfg.Port)
@@ -76,15 +74,16 @@ func setupDBConnection(cfg struct {
 // Запускает веб-сервер
 func startWebServer(addr string) {
     // Настройка маршрутов
-    // Обслуживание статических файлов из директории "static"
     http.Handle("/", http.FileServer(http.Dir("./static")))
-    // API маршруты
-    http.HandleFunc("/api/databases", authMiddleware(handleGetDatabases)) // Получение списка БД [cite: 9]
-    http.HandleFunc("/api/delete", authMiddleware(handleDeleteDatabase)) // Удаление БД [cite: 18, 7]
-    http.HandleFunc("/api/backups", authMiddleware(handleGetBackups)) // Получение списка бэкапов [cite: 21, 12]
-    http.HandleFunc("/api/restore", authMiddleware(handleRestoreDatabase)) // Восстановление [cite: 24]
-    http.HandleFunc("/api/log", authMiddleware(handleGetBriefLog)) // Получение краткого лога [cite: 16, 31]
-    http.HandleFunc("/api/cancel-restore", authMiddleware(handleCancelRestore)) // Отмена восстановления
+    
+    // API маршруты:
+    // handleStartRestore (бывший handleRestoreDatabase) и handleCancelRestoreProcess (бывший handleCancelRestore)
+    http.HandleFunc("/api/databases", authMiddleware(handleGetDatabases))
+    http.HandleFunc("/api/delete", authMiddleware(handleDeleteDatabase)) 
+    http.HandleFunc("/api/backups", authMiddleware(handleGetBackups))
+    http.HandleFunc("/api/restore", authMiddleware(handleStartRestore)) 
+    http.HandleFunc("/api/log", authMiddleware(handleGetBriefLog))
+    http.HandleFunc("/api/cancel-restore", authMiddleware(handleCancelRestoreProcess)) 
 
     LogInfo(fmt.Sprintf("Веб-сервер запущен на %s", addr))
     
