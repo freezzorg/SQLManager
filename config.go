@@ -32,14 +32,14 @@ type Config struct {
 // Структура для отображения базы данных в веб-интерфейсе
 type Database struct {
     Name       string `json:"name"`
-    State      string `json:"state"` // Состояние базы (ONLINE, RESTORING и т.д.)
+    State      string `json:"state"` // Состояние базы (online, offline, restoring, error)
 }
 
 // Структура для отображения бэкапа
 type BackupFile struct {
-    FileName  string    `json:"fileName"`
-    Type      string    `json:"type"` // .bak, .diff, .trn [cite: 4]
-    BackupDate time.Time `json:"backupDate"` // Дата и время из метаданных [cite: 14]
+    FileName  string       `json:"fileName"`
+    // Type      string       `json:"type"` // .bak, .diff, .trn [cite: 4] - Удаляем, так как для списка директорий не нужен
+    // BackupDate sql.NullTime `json:"backupDate"` // Дата и время из метаданных [cite: 14], может быть NULL - Удаляем
 }
 
 // Структура для краткого лога действий [cite: 16]

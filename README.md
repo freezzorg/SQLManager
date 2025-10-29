@@ -13,11 +13,24 @@ sudo chown -R sql:"пользователи домена" /mnt/sql_backups
 sudo chmod -R 750 /mnt/sql_backups
 ```
 
-- Настроить /etc/fstab для монтирования windows-шары при загрузке сервера:
+- Настроить монтирования windows-шары при загрузке сервера через systemd:
 ```bash
-sudo mount -t cifs \
-  -o username=sql,password=sql,domain=kcep,vers=3.0,uid=mssql,gid=mssql,file_mode=0660,dir_mode=0770 \
-  //veeamsrv.kcep.local/backup$/mssql /mnt/sql_backups
+sudo nano /etc/systemd/system/mnt-sql_backups.mount
+```
+```bash
+[Unit]
+Description=CIFS Share Mount for SQL Backups
+Requires=network-online.target
+After=network-online.target
+
+[Mount]
+What=//veeamsrv.kcep.local/backup$/mssql
+Where=/mnt/sql_backups
+Type=cifs
+Options=vers=3.0,credentials=/etc/smbcredentials/.veeamsrv_creds,uid=mssql,gid=mssql,file_mode=0660,dir_mode=0770,_netdev
+
+[Install]
+WantedBy=multi-user.target
 ```
 - Добавить пользователя sql в группу mssql, что бы приложение могло читать данные их шары:
 ```bash

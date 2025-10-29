@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -34,10 +35,28 @@ func getDatabases() ([]Database, error) {
     var databases []Database
     for rows.Next() {
         var db Database
-        if err := rows.Scan(&db.Name, &db.State); err != nil {
+        var stateDesc string // Сканируем state_desc как string
+        if err := rows.Scan(&db.Name, &stateDesc); err != nil {
             return nil, fmt.Errorf("ошибка сканирования строки БД: %w", err)
         }
+        
+        // Преобразуем состояние базы в упрощённый статус
+        switch strings.ToUpper(stateDesc) {
+        case "ONLINE":
+            db.State = "online"
+        case "RESTORING", "RECOVERING": // Добавляем "RECOVERING" из примера PowerShell
+            db.State = "restoring"
+        case "OFFLINE", "SUSPECT", "EMERGENCY": // Добавляем "EMERGENCY" из примера PowerShell
+            db.State = "error"
+        default:
+            db.State = "unknown"
+        }
+        
+        LogDebug(fmt.Sprintf("Получена база данных: Name='%s', State='%s' (оригинальное: '%s')", db.Name, db.State, stateDesc)) // Обновлено логирование
         databases = append(databases, db)
+    }
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("ошибка после итерации строк БД: %w", err)
     }
     return databases, nil
 }

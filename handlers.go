@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -58,6 +57,11 @@ func handleGetDatabases(w http.ResponseWriter, r *http.Request) {
     }
 
     w.Header().Set("Content-Type", "application/json")
+    if debugOutput, err := json.Marshal(databases); err == nil {
+        LogDebug(fmt.Sprintf("Отправка списка баз данных: %s", string(debugOutput)))
+    } else {
+        LogError(fmt.Sprintf("Ошибка маршалинга списка баз данных для отладки: %v", err))
+    }
     json.NewEncoder(w).Encode(databases)
     LogDebug("Список баз данных отправлен.")
 }
@@ -197,116 +201,20 @@ func handleGetBackups(w http.ResponseWriter, r *http.Request) {
         LogDebug(fmt.Sprintf("SMB-шара %s уже смонтирована на %s.", remotePath, mountPoint))
     }
 
-    // 2. Чтение файлов бэкапов из локальной точки монтирования
-    files, err := os.ReadDir(mountPoint)
+    // 2. Чтение имен директорий бэкапов из локальной точки монтирования
+    backupFiles, err := getBackupBaseNames(mountPoint, appConfig.App.BackupBlacklist)
     if err != nil {
-        LogError(fmt.Sprintf("Ошибка чтения каталога бэкапов %s: %v", mountPoint, err))
+        LogError(fmt.Sprintf("Ошибка при получении списка названий баз бэкапов: %v", err))
         http.Error(w, "Ошибка сервера при чтении бэкапов", http.StatusInternalServerError)
         return
     }
 
-    var backupFiles []BackupFile
-    for _, file := range files {
-        if file.IsDir() {
-            continue
-        }
-        fileName := file.Name()
-
-        // Проверка на черный список
-        isBlacklisted := false
-        for _, blName := range appConfig.App.BackupBlacklist {
-            if strings.Contains(fileName, blName) {
-                isBlacklisted = true
-                LogDebug(fmt.Sprintf("Файл бэкапа '%s' находится в черном списке и будет пропущен.", fileName))
-                break
-            }
-        }
-        if isBlacklisted {
-            continue
-        }
-
-        if strings.HasSuffix(fileName, ".bak") || strings.HasSuffix(fileName, ".diff") || strings.HasSuffix(fileName, ".trn") {
-            fullPath := filepath.Join(mountPoint, fileName)
-            
-            // Получение метаданных бэкапа с помощью RESTORE HEADERONLY
-            headerQuery := fmt.Sprintf("RESTORE HEADERONLY FROM DISK = N'%s'", fullPath)
-            rows, err := dbConn.Query(headerQuery)
-            if err != nil {
-                LogWarning(fmt.Sprintf("Не удалось получить заголовок бэкапа %s: %v", fileName, err))
-                continue
-            }
-            defer rows.Close()
-
-            var backupDate time.Time
-            var backupType string
-            
-            // Используем структуру для более надежного сканирования заголовка бэкапа
-            var header struct {
-                BackupType       int       `sql:"BackupType"`
-                BackupFinishDate time.Time `sql:"BackupFinishDate"`
-            }
-
-            // Для сканирования полей по имени, нужно использовать обертку или кастомный сканер.
-            // В данном случае, для простоты, будем сканировать все поля в интерфейсы, а затем выбирать нужные.
-            // Это менее эффективно, но более надежно, чем позиционное сканирование.
-            columns, err := rows.Columns()
-            if err != nil {
-                LogWarning(fmt.Sprintf("Ошибка получения имен столбцов для заголовка бэкапа %s: %v", fileName, err))
-                continue
-            }
-
-            values := make([]interface{}, len(columns))
-            valuePtrs := make([]interface{}, len(columns))
-            for i := range columns {
-                valuePtrs[i] = &values[i]
-            }
-
-            if rows.Next() {
-                err := rows.Scan(valuePtrs...)
-                if err != nil {
-                    LogWarning(fmt.Sprintf("Ошибка сканирования заголовка бэкапа %s: %v", fileName, err))
-                    continue
-                }
-
-                // Поиск нужных полей по имени
-                for i, colName := range columns {
-                    switch colName {
-                    case "BackupType":
-                        if val, ok := values[i].(int64); ok {
-                            header.BackupType = int(val)
-                        }
-                    case "BackupFinishDate":
-                        if val, ok := values[i].(time.Time); ok {
-                            header.BackupFinishDate = val
-                        }
-                    }
-                }
-                
-                backupDate = header.BackupFinishDate
-                switch header.BackupType {
-                case 1:
-                    backupType = ".bak" // Full
-                case 2:
-                    backupType = ".diff" // Differential
-                case 5:
-                    backupType = ".trn" // Transaction Log
-                default:
-                    backupType = ".unknown"
-                }
-            } else {
-                LogWarning(fmt.Sprintf("Не удалось прочитать заголовок бэкапа %s: нет строк", fileName))
-                continue
-            }
-
-            backupFiles = append(backupFiles, BackupFile{
-                FileName:  fileName,
-                Type:      backupType,
-                BackupDate: backupDate,
-            })
-        }
-    }
-
     w.Header().Set("Content-Type", "application/json")
+    if debugOutput, err := json.Marshal(backupFiles); err == nil {
+        LogDebug(fmt.Sprintf("Отправка списка бэкапов: %s", string(debugOutput)))
+    } else {
+        LogError(fmt.Sprintf("Ошибка маршалинга списка бэкапов для отладки: %v", err))
+    }
     json.NewEncoder(w).Encode(backupFiles)
     LogDebug("Список бэкапов отправлен.")
 }
@@ -365,4 +273,34 @@ func handleCancelRestore(w http.ResponseWriter, r *http.Request) {
 
     w.WriteHeader(http.StatusOK)
     LogInfo(fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName))
+}
+
+// Вспомогательная функция для получения списка имен директорий (названий баз)
+func getBackupBaseNames(root string, blacklist []string) ([]BackupFile, error) {
+    var baseNames []BackupFile
+    entries, err := os.ReadDir(root)
+    if err != nil {
+        return nil, fmt.Errorf("ошибка чтения каталога бэкапов %s: %w", root, err)
+    }
+
+    for _, entry := range entries {
+        if entry.IsDir() {
+            dirName := entry.Name()
+            // Проверка на черный список
+            isBlacklisted := false
+            for _, blName := range blacklist {
+                if strings.Contains(dirName, blName) {
+                    isBlacklisted = true
+                    LogDebug(fmt.Sprintf("Директория бэкапа '%s' находится в черном списке и будет пропущена.", dirName))
+                    break
+                }
+            }
+            if isBlacklisted {
+                continue
+            }
+            LogDebug(fmt.Sprintf("Добавлена директория бэкапа: '%s'", dirName)) // Добавлено логирование
+            baseNames = append(baseNames, BackupFile{FileName: dirName})
+        }
+    }
+    return baseNames, nil
 }

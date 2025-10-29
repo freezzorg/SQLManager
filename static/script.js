@@ -1,9 +1,11 @@
 document.addEventListener('DOMContentLoaded', () => {
     const databaseList = document.getElementById('database-list');
+    console.log('databaseList (DOM element):', databaseList); // Добавлено логирование
     const deleteDbBtn = document.getElementById('delete-db-btn');
     const refreshDbBtn = document.getElementById('refresh-db-btn');
 
     const backupSelect = document.getElementById('backup-select');
+    console.log('backupSelect (DOM element):', backupSelect); // Добавлено логирование
     const refreshBackupsBtn = document.getElementById('refresh-backups-btn');
     const newDbNameInput = document.getElementById('new-db-name');
     const clearDbNameBtn = document.getElementById('clear-db-name-btn');
@@ -29,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const databases = await response.json();
+            console.log('Полученные базы данных:', databases); // Добавлено логирование
             renderDatabases(databases);
         } catch (error) {
             console.error('Ошибка при получении списка баз данных:', error);
@@ -39,25 +42,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderDatabases(databases) {
         databaseList.innerHTML = '';
         databases.forEach(db => {
+            const { name, state } = db; // Деструктуризация
+            console.log('Деструктурированные данные базы:', { name, state }); // Добавлено логирование
+            
             const li = document.createElement('li');
-            li.textContent = db.Name;
-            li.dataset.dbName = db.Name;
+            li.appendChild(document.createTextNode(name)); // Используем createTextNode
+            li.dataset.dbName = name;
 
             const statusIndicator = document.createElement('span');
             statusIndicator.classList.add('status-indicator');
-            switch (db.State.toUpperCase()) {
-                case 'ONLINE':
-                    statusIndicator.classList.add('status-online');
-                    break;
-                case 'RESTORING':
-                    statusIndicator.classList.add('status-restoring');
-                    break;
-                case 'OFFLINE':
-                case 'SUSPECT':
-                default:
-                    statusIndicator.classList.add('status-offline');
-                    break;
-            }
+            statusIndicator.classList.add(`status-${state}`); // Используем state напрямую
             li.appendChild(statusIndicator);
 
             li.addEventListener('click', () => {
@@ -70,8 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 // Выделяем текущую
                 li.classList.add('selected');
-                selectedDatabase = db.Name;
-                newDbNameInput.value = db.Name; // Копируем имя в поле ввода
+                selectedDatabase = db.name;
+                newDbNameInput.value = db.name; // Копируем имя в поле ввода
             });
             databaseList.appendChild(li);
         });
@@ -110,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const backups = await response.json();
+            console.log('Полученные бэкапы:', backups); // Добавлено логирование
             renderBackups(backups);
         } catch (error) {
             console.error('Ошибка при получении списка бэкапов:', error);
@@ -119,7 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderBackups(backups) {
         backupSelect.innerHTML = '';
-        if (backups.length === 0) {
+        if (!backups || backups.length === 0) { // Проверяем на null или пустой массив
             const option = document.createElement('option');
             option.value = '';
             option.textContent = 'Бэкапы не найдены';
@@ -127,9 +122,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         backups.forEach(backup => {
+            const { fileName } = backup; // Деструктуризация
+            console.log('Деструктурированные данные бэкапа:', { fileName }); // Добавлено логирование
+            
             const option = document.createElement('option');
-            option.value = backup.FileName; // Полный путь к файлу бэкапа
-            option.textContent = `${backup.FileName} (${new Date(backup.BackupDate).toLocaleString()})`;
+            option.value = fileName; // Имя директории (название базы)
+            option.appendChild(document.createTextNode(fileName)); // Используем createTextNode
             backupSelect.appendChild(option);
         });
     }
