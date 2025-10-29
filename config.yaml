@@ -25,7 +25,9 @@ app:
     - "-=scripts=-"
     - "-=SQL1=-"
     - "autojournal"
+    - "Forbest_test"
     - "FullBackupBases"
+    - "Kazcentrelektroprvod2010"
     - "master-mssql"
     - "master-nsql"
     - "master-usql"
@@ -34,6 +36,10 @@ app:
     - "msdb-nsql"
     - "msdb-usql"
     - "msdb-wms"
+    - "test"
+    - "test_upp"
+    - "test_upp_forbitrix24"
+    - "wms"
 
 # Белый список IP-адресов/хостов для доступа к веб-интерфейсу 
 whitelist:

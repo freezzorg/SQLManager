@@ -298,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/api/databases');
             const databases = await response.json();
-            const dbExists = databases.some(db => db.Name === newDbName);
+            const dbExists = databases.some(db => db.name === newDbName);
 
             if (dbExists) {
                 if (confirm(`Вы действительно хотите восстановить бэкап в существующую базу '${newDbName}'?`)) {
