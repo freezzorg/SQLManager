@@ -41,8 +41,8 @@ type BackupFile struct {
     BaseName  string `json:"baseName"` 
 }
 
-// Структура для краткого лога действий (используется в logging.go)
+// Структура для краткого лога
 type LogEntry struct {
-    Timestamp time.Time `json:"timestamp"`
-    Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+	Message   string    `json:"message"`
 }

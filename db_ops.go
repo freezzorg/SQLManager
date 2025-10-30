@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ type BackupLogicalFile struct {
 
 // Структура для хранения информации о файле бэкапа для цепочки восстановления
 type BackupFileSequence struct {
-	Path     string    // Полный ЛОКАЛЬНЫЙ путь к файлу (например, /mnt/sql_backups/Edelweis/file.bak)
+	Path     string    // Полный ЛОКАЛЬНЫЙ путь к файлу
 	Time     time.Time // Время из имени файла
 	Type     string    // bak, diff, trn
 	FullPath string    // Полный локальный путь (для отладки)
@@ -35,98 +36,318 @@ func extractTimeFromFilename(filename string) (time.Time, error) {
 		// Обычно дата - предпоследний элемент, время - последний (без расширения)
 		timeStr = parts[len(parts)-2] + "_" + strings.TrimSuffix(parts[len(parts)-1], filepath.Ext(parts[len(parts)-1]))
 	} else {
-		return time.Time{}, fmt.Errorf("неверный формат имени файла: %s", filename)
+		return time.Time{}, fmt.Errorf("неверный формат имени файла бэкапа: %s", filename)
 	}
 
-	// Формат YYYYMMDD_HHMMSS. Используем Local для соответствия вашему логу.
-	t, err := time.ParseInLocation("20060102_150405", timeStr, time.Local)
+	// Формат времени: YYYYMMDD_HHMMSS
+	t, err := time.Parse("20060102_150405", timeStr)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("не удалось распарсить время %s: %w", timeStr, err)
+		return time.Time{}, fmt.Errorf("ошибка парсинга даты/времени из имени файла %s: %w", filename, err)
 	}
 	return t, nil
 }
 
-// Находит оптимальную последовательность бэкапов для PIRT
-func getRestoreSequence(backupBaseName string, restoreTime time.Time) ([]BackupFileSequence, error) {
-	// fullLocalDir: /mnt/sql_backups/Edelweis
-	fullLocalDir := filepath.Join(appConfig.SMBShare.LocalMountPoint, backupBaseName)
-
-	entries, err := os.ReadDir(fullLocalDir)
-	if err != nil {
-		return nil, fmt.Errorf("ошибка чтения каталога бэкапа %s: %w", fullLocalDir, err)
-	}
-
-	var files []BackupFileSequence
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		fileName := entry.Name()
-		ext := strings.ToLower(filepath.Ext(fileName))
-
-		if ext != ".bak" && ext != ".diff" && ext != ".trn" {
-			continue
-		}
-
-		fileTime, err := extractTimeFromFilename(fileName)
-		if err != nil {
-			LogWarning(fmt.Sprintf("Пропуск файла %s: %v", fileName, err))
-			continue
-		}
-		
-		// Включаем файлы, созданные до или в момент времени восстановления
-		if fileTime.After(restoreTime) {
-			continue
-		}
-
-		fileType := strings.TrimPrefix(ext, ".")
-		localPath := filepath.Join(fullLocalDir, fileName)
-
-		files = append(files, BackupFileSequence{
-			Path:     localPath, // Используется локальный путь
-			Time:     fileTime,
-			Type:     fileType,
-			FullPath: localPath,
-		})
-	}
-
-	if len(files) == 0 {
-		return nil, fmt.Errorf("в каталоге %s не найдено подходящих файлов бэкапов до %s", backupBaseName, restoreTime.Format("02.01.2006 15:04:05"))
-	}
-
-	// Сортировка по времени
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].Time.Before(files[j].Time)
-	})
-
-	// Выбор оптимальной цепочки
-	var fullOrDiffIndex = -1
+// Получение логических имен файлов из бэкапа (для формирования MOVE)
+func getBackupLogicalFiles(backupPath string) ([]BackupLogicalFile, error) {
+    // Внимание: RESTORE FILELISTONLY возвращает более 40 столбцов, многие из которых могут быть NULL.
+    query := fmt.Sprintf("RESTORE FILELISTONLY FROM DISK = N'%s'", backupPath)
 	
-	// 1. Ищем самый свежий полный (.bak) или дифференциальный (.diff) бэкап до restoreTime
-SearchLoop:
-	for i := len(files) - 1; i >= 0; i-- {
-        file := files[i]
-        // ИСПОЛЬЗУЕМ TAGGED SWITCH ДЛЯ СТИЛИСТИЧЕСКОГО УЛУЧШЕНИЯ
-		switch file.Type { 
-        case "bak", "diff":
-            fullOrDiffIndex = i
-            break SearchLoop
+	LogDebug(fmt.Sprintf("Выполнение RESTORE FILELISTONLY: %s", query))
+    rows, err := dbConn.Query(query)
+    if err != nil {
+        return nil, fmt.Errorf("ошибка при запросе RESTORE FILELISTONLY: mssql: %w", err)
+    }
+    defer rows.Close()
+
+    columnNames, colErr := rows.Columns()
+    if colErr != nil {
+         return nil, fmt.Errorf("ошибка получения имен столбцов: %w", colErr)
+    }
+    numColumns := len(columnNames)
+
+    var logicalFiles []BackupLogicalFile
+    for rows.Next() {
+        // Переменные для нужных нам столбцов
+        var logicalName, physicalName, fileType string
+        var fileGroupName sql.NullString // ИСПРАВЛЕНО: FileGroupName может быть NULL
+
+        // Инициализация аргументов сканирования. Нам нужны первые 4, остальные - заглушки.
+        scanArgs := make([]interface{}, numColumns)
+        
+        // Назначаем адреса наших переменных первым четырем
+        scanArgs[0] = &logicalName 
+        scanArgs[1] = &physicalName 
+        scanArgs[2] = &fileType 
+        scanArgs[3] = &fileGroupName 
+        
+        // Назначаем заглушки для остальных столбцов
+        for i := 4; i < numColumns; i++ {
+            var dummy interface{}
+            scanArgs[i] = &dummy
         }
+
+        if err := rows.Scan(scanArgs...); err != nil { 
+            return nil, fmt.Errorf("ошибка сканирования строки RESTORE FILELISTONLY: %w", err)
+        }
+		
+        // Нас интересуют DATA ("D") и LOG ("L") файлы
+        if fileType == "D" || fileType == "L" {
+            fileEntry := BackupLogicalFile{
+                LogicalName: logicalName,
+                Type:        strings.Replace(fileType, "D", "DATA", 1), 
+            }
+            fileEntry.Type = strings.Replace(fileEntry.Type, "L", "LOG", 1) 
+            logicalFiles = append(logicalFiles, fileEntry)
+        }
+    }
+
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("ошибка после итерации строк RESTORE FILELISTONLY: %w", err)
+    }
+	
+	if len(logicalFiles) == 0 {
+		return nil, fmt.Errorf("RESTORE FILELISTONLY не вернул DATA или LOG файлы")
 	}
 
-	if fullOrDiffIndex == -1 {
-		return nil, fmt.Errorf("не найден полный бэкап (.bak) до %s", restoreTime.Format("02.01.2006 15:04:05"))
-	}
-	
-	// Добавляем полный/дифференциальный бэкап и все последующие файлы
-	sequence := files[fullOrDiffIndex:]
-    
-	LogDebug(fmt.Sprintf("Найдена цепочка восстановления из %d файлов, начиная с %s.", len(sequence), sequence[0].FullPath))
-	return sequence, nil
+    return logicalFiles, nil
 }
 
-// --- ОСНОВНЫЕ ФУНКЦИИ ---
+
+// Определяет последовательность бэкапов для восстановления на указанный момент времени
+func getRestoreSequence(baseName string, restoreTime *time.Time) ([]BackupFileSequence, error) {
+	// 1. Читаем все файлы бэкапов для этой базы
+	backupDir := filepath.Join(appConfig.SMBShare.LocalMountPoint, baseName)
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка чтения директории бэкапа %s: %w", backupDir, err)
+	}
+
+	var allFiles []BackupFileSequence
+	for _, entry := range entries {
+		filename := entry.Name()
+		ext := strings.ToLower(filepath.Ext(filename))
+		fileType := strings.TrimPrefix(ext, ".")
+		
+		if fileType == "bak" || fileType == "diff" || fileType == "trn" {
+			t, err := extractTimeFromFilename(filename)
+			if err != nil {
+				LogDebug(fmt.Sprintf("Пропущен файл из-за ошибки времени: %s: %v", filename, err))
+				continue
+			}
+			allFiles = append(allFiles, BackupFileSequence{
+				Path:     filepath.Join(backupDir, filename),
+				Time:     t,
+				Type:     fileType,
+				FullPath: filepath.Join(backupDir, filename), 
+			})
+		}
+	}
+
+	if len(allFiles) == 0 {
+		return nil, fmt.Errorf("в директории %s не найдены файлы бэкапов", backupDir)
+	}
+
+	// 2. Сортируем все файлы по времени (от старых к новым)
+	sort.Slice(allFiles, func(i, j int) bool {
+		return allFiles[i].Time.Before(allFiles[j].Time)
+	})
+
+	// 3. Корректный поиск цепочки для PIRT
+	var fullIndex = -1
+	var diffIndex = -1
+	
+	// A. Ищем самый свежий полный (.bak) бэкап, который был создан ДО (или в) restoreTime
+	for i := len(allFiles) - 1; i >= 0; i-- { 
+		file := allFiles[i]
+		if restoreTime != nil && file.Time.After(*restoreTime) {
+			continue 
+		}
+		if file.Type == "bak" {
+			fullIndex = i
+			break 
+		}
+	}
+
+	if fullIndex == -1 {
+		return nil, fmt.Errorf("не найден полный бэкап (.bak) до указанного времени")
+	}
+
+	// B. Ищем самый свежий дифференциальный (.diff) бэкап, 
+    // который был создан ПОСЛЕ полного (fullIndex) и ДО (или в) restoreTime
+	for i := len(allFiles) - 1; i > fullIndex; i-- { 
+		file := allFiles[i]
+		if file.Type == "diff" && file.Time.After(allFiles[fullIndex].Time) {
+			if restoreTime != nil && file.Time.After(*restoreTime) {
+				continue // Пропускаем, если DIFF новее, чем время PIRT
+			}
+			diffIndex = i
+			break // Нашли самый свежий подходящий DIFF
+		}
+	}
+
+	// 4. Формируем последовательность восстановления
+	filesToRestore := make([]BackupFileSequence, 0)
+	
+	// Всегда добавляем полный бэкап
+	filesToRestore = append(filesToRestore, allFiles[fullIndex]) 
+
+	// Если найден дифференциальный бэкап, добавляем его сразу после полного
+	lastIndex := fullIndex
+	if diffIndex != -1 {
+		filesToRestore = append(filesToRestore, allFiles[diffIndex])
+		lastIndex = diffIndex
+	}
+
+	// 5. Добавляем бэкапы журналов транзакций (.trn) после последнего добавленного файла (full или diff)
+	for i := lastIndex + 1; i < len(allFiles); i++ {
+		file := allFiles[i]
+		if file.Type == "trn" {
+			// Проверяем, что TRN не новее времени восстановления (для PIRT)
+			if restoreTime != nil && file.Time.After(*restoreTime) {
+				continue
+			}
+			filesToRestore = append(filesToRestore, file)
+		}
+	}
+    
+    if len(filesToRestore) == 0 {
+		return nil, fmt.Errorf("не удалось сформировать цепочку восстановления")
+	}
+
+	LogDebug(fmt.Sprintf("Найдена цепочка восстановления из %d файлов, начиная с %s.", len(filesToRestore), filesToRestore[0].Path))
+	return filesToRestore, nil
+}
+
+// Запускает асинхронный процесс восстановления базы данных
+func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) error {
+    // Используем горутину, чтобы не блокировать обработчик HTTP-запросов
+    go func() {
+        LogInfo(fmt.Sprintf("Начато восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
+
+        // 1. Получение последовательности бэкапов
+        filesToRestore, err := getRestoreSequence(backupBaseName, restoreTime)
+        if err != nil {
+            LogError(fmt.Sprintf("Ошибка получения последовательности бэкапов для %s: %v", backupBaseName, err))
+            return
+        }
+
+        // 2. Определение первого файла и логических имен
+        startFile := filesToRestore[0]
+        
+        // Получаем логические имена файлов из первого файла в цепочке (startFile)
+		logicalFiles, err := getBackupLogicalFiles(startFile.Path)
+		if err != nil {
+			LogError(fmt.Sprintf("Ошибка получения логических имен файлов бэкапа для %s: %v", backupBaseName, err))
+			return
+		}
+        LogDebug(fmt.Sprintf("Успешно получены логические имена файлов из бэкапа: %+v", logicalFiles))
+
+		// 3. Формируем MOVE-часть команды RESTORE
+		var moveClause string
+		var moveParts []string
+		
+		for _, logicalFile := range logicalFiles {
+			var ext string
+			var physicalFileName string 
+
+			switch logicalFile.Type {
+			case "DATA":
+				ext = ".mdf"
+				// Формируем имя файла как NewDBName.mdf
+				physicalFileName = fmt.Sprintf("%s%s", newDBName, ext)
+			case "LOG":
+				ext = ".ldf"
+				// Формируем имя файла как NewDBName_log.ldf
+				physicalFileName = fmt.Sprintf("%s_log%s", newDBName, ext)
+			default:
+				// Если тип файла неизвестен, просто пропускаем
+				continue
+			}
+
+			// Формируем полный путь к физическому файлу
+			physicalPath := filepath.Join(appConfig.MSSQL.RestorePath, physicalFileName) 
+
+			moveParts = append(moveParts, fmt.Sprintf("MOVE N'%s' TO N'%s'", logicalFile.LogicalName, physicalPath))
+		}
+
+		moveClause = strings.Join(moveParts, ", ")
+        
+        // 4. Выполнение восстановления
+        for i, file := range filesToRestore {
+            isLastFile := i == len(filesToRestore)-1
+            var restoreQuery string
+            
+            var recoveryOption string
+            if isLastFile {
+                if restoreTime != nil {
+                    // Последний бэкап в PIRT-цепочке: используем RECOVERY и STOPAT
+                    recoveryOption = fmt.Sprintf("RECOVERY, STOPAT = N'%s'", restoreTime.Format("2006-01-02 15:04:05"))
+                } else {
+                    // Последний бэкап в обычном восстановлении: используем RECOVERY
+                    recoveryOption = "RECOVERY"
+                }
+            } else {
+                // Не последний бэкап: используем NORECOVERY
+                recoveryOption = "NORECOVERY"
+            }
+            
+            // Формирование команды RESTORE
+            if i == 0 {
+                // Первый файл (FULL/DIFF) использует MOVE и REPLACE
+                restoreQuery = fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s' WITH %s, REPLACE, %s, STATS = 10", newDBName, file.Path, moveClause, recoveryOption)
+            } else {
+                // Последующие файлы (DIFF/TRN). MOVE не нужен.
+                switch file.Type {
+				case "trn":
+					// LOG бэкап. 
+					restoreQuery = fmt.Sprintf("RESTORE LOG [%s] FROM DISK = N'%s' WITH %s, STATS = 10", newDBName, file.Path, recoveryOption)
+				case "diff":
+					// DIFF бэкап. 
+					restoreQuery = fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s' WITH %s, STATS = 10", newDBName, file.Path, recoveryOption)
+				}
+            }
+            
+            LogDebug(fmt.Sprintf("Выполнение RESTORE (%d/%d): %s", i+1, len(filesToRestore), restoreQuery))
+            
+            if _, err := dbConn.Exec(restoreQuery); err != nil {
+                LogError(fmt.Sprintf("Ошибка RESTORE для %s (файл: %s): %v", newDBName, file.Path, err))
+                // Удаляем нерабочую БД при ошибке восстановления
+                deleteDatabase(newDBName) 
+                return
+            }
+        }
+        
+        LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
+
+    }()
+
+    return nil
+}
+
+// Удаление базы данных
+func deleteDatabase(dbName string) error {
+    LogDebug(fmt.Sprintf("Удаление базы данных %s...", dbName))
+    // Устанавливаем базу в SINGLE_USER, чтобы сбросить все соединения
+    singleUserQuery := fmt.Sprintf("ALTER DATABASE [%s] SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName)
+    if _, err := dbConn.Exec(singleUserQuery); err != nil {
+        return fmt.Errorf("ошибка перевода БД в SINGLE_USER: %w", err)
+    }
+
+    // Удаляем базу данных
+    deleteQuery := fmt.Sprintf("DROP DATABASE [%s]", dbName)
+    if _, err := dbConn.Exec(deleteQuery); err != nil {
+        return fmt.Errorf("ошибка DROP DATABASE: %w", err)
+    }
+
+    return nil
+}
+
+
+// Отмена восстановления (УДАЛЯЕТ БД, так как она неработоспособна)
+func cancelRestoreProcess(dbName string) error {
+	LogInfo(fmt.Sprintf("Получен запрос на отмену восстановления. Удаление нерабочей базы данных '%s'.", dbName))
+	return deleteDatabase(dbName)
+}
 
 // Получение списка пользовательских баз данных
 func getDatabases() ([]Database, error) {
@@ -137,7 +358,7 @@ func getDatabases() ([]Database, error) {
         FROM
             sys.databases
         WHERE
-            database_id > 4 -- Исключение системных баз: master, model, msdb, tempdb 
+            database_id > 4 -- Исключение системных баз
             AND name NOT IN ('master', 'model', 'msdb', 'tempdb')
         ORDER BY
             name;
@@ -165,225 +386,14 @@ func getDatabases() ([]Database, error) {
         case "OFFLINE":
             db.State = "offline"
         default:
-            db.State = "unknown"
+            db.State = "error" 
         }
-        
-        LogDebug(fmt.Sprintf("Получена база данных: Name='%s', State='%s' (оригинальное: '%s')", db.Name, db.State, stateDesc))
         databases = append(databases, db)
     }
-
+    
     if err := rows.Err(); err != nil {
-        return nil, fmt.Errorf("ошибка после итерации строк: %w", err)
+        return nil, fmt.Errorf("ошибка после итерации строк БД: %w", err)
     }
-	
+
     return databases, nil
-}
-
-// Получение логических имен файлов из бэкапа
-func getBackupLogicalFiles(backupPath string) ([]BackupLogicalFile, error) {
-	// backupPath - это локальный путь (/mnt/sql_backups/...), который SQL Server может прочитать
-    query := fmt.Sprintf("RESTORE FILELISTONLY FROM DISK = N'%s'", backupPath)
-	
-	LogDebug(fmt.Sprintf("Выполнение RESTORE FILELISTONLY: %s", query))
-    rows, err := dbConn.Query(query)
-    if err != nil {
-        return nil, fmt.Errorf("ошибка при запросе RESTORE FILELISTONLY: mssql: %w", err)
-    }
-    defer rows.Close()
-
-    var logicalFiles []BackupLogicalFile
-    for rows.Next() {
-        var logicalName, physicalName, fileType, fileGroupName string
-        
-        // Используем большое количество заглушек (interface{}) для безопасного сканирования
-        // широкого набора колонок, который возвращает RESTORE FILELISTONLY.
-        var dummy1, dummy2, dummy3, dummy4, dummy5, dummy6, dummy7, dummy8, dummy9, dummy10, 
-            dummy11, dummy12, dummy13, dummy14, dummy15, dummy16, dummy17, dummy18, dummy19, dummy20, 
-            dummy21, dummy22, dummy23, dummy24, dummy25, dummy26, dummy27, dummy28, dummy29, dummy30 interface{}
-			
-        if err := rows.Scan(
-            &logicalName, &physicalName, &fileType, &fileGroupName,
-            &dummy1, &dummy2, &dummy3, &dummy4, &dummy5, &dummy6, 
-            &dummy7, &dummy8, &dummy9, &dummy10, &dummy11, &dummy12, 
-            &dummy13, &dummy14, &dummy15, &dummy16, &dummy17, &dummy18, 
-            &dummy19, &dummy20, &dummy21, &dummy22, &dummy23, &dummy24, 
-            &dummy25, &dummy26, &dummy27, &dummy28, &dummy29, &dummy30,
-        ); err != nil {
-            return nil, fmt.Errorf("ошибка сканирования строки RESTORE FILELISTONLY: %w", err)
-        }
-		
-        // Нас интересуют DATA ("D") и LOG ("L") файлы
-        if fileType == "D" || fileType == "L" {
-            fileEntry := BackupLogicalFile{
-                LogicalName: logicalName,
-                Type:        strings.Replace(fileType, "D", "DATA", 1), 
-            }
-            fileEntry.Type = strings.Replace(fileEntry.Type, "L", "LOG", 1) 
-            logicalFiles = append(logicalFiles, fileEntry)
-        }
-    }
-
-    if err := rows.Err(); err != nil {
-        return nil, fmt.Errorf("ошибка после итерации строк RESTORE FILELISTONLY: %w", err)
-    }
-	
-	if len(logicalFiles) == 0 {
-		return nil, fmt.Errorf("RESTORE FILELISTONLY не вернул DATA или LOG файлы")
-	}
-
-    return logicalFiles, nil
-}
-
-// Запуск процесса восстановления
-func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) error {
-    go func() {
-        LogInfo(fmt.Sprintf("Начато восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
-
-        var filesToRestore []BackupFileSequence
-        var err error
-
-		// Если restoreTime не указан, используем текущее время для поиска последнего .bak
-        if restoreTime == nil {
-            now := time.Now()
-            restoreTime = &now
-        }
-		
-        // 1. Формирование цепочки восстановления (PIRT)
-        filesToRestore, err = getRestoreSequence(backupBaseName, *restoreTime)
-        if err != nil {
-            LogError(fmt.Sprintf("Ошибка составления цепочки бэкапов для PIRT: %v", err))
-            return
-        }
-
-        // 2. Получение логических имен файлов из ПЕРВОГО файла цепочки 
-        firstBackupPath := filesToRestore[0].Path // Используется ЛОКАЛЬНЫЙ путь
-        logicalFiles, err := getBackupLogicalFiles(firstBackupPath)
-        if err != nil {
-            LogError(fmt.Sprintf("ОШИБКА: Ошибка получения логических имен файлов бэкапа для %s: %v", backupBaseName, err))
-            return
-        }
-        
-        LogDebug(fmt.Sprintf("Успешно получены логические имена файлов из бэкапа: %v", logicalFiles))
-
-        // 3. Построение команды RESTORE DATABASE (MOVE-часть)
-        moveClause := ""
-        // RestorePath должен быть путем на СЕРВЕРЕ MSSQL (например, D:\MSSQL\DATA\)
-        restorePath := appConfig.MSSQL.RestorePath 
-        // Убеждаемся, что RestorePath заканчивается на обратный слеш
-        if !strings.HasSuffix(restorePath, "\\") {
-            restorePath += "\\"
-        }
-        
-        for i, lf := range logicalFiles {
-            if i > 0 {
-                moveClause += ", "
-            }
-            ext := ".mdf"
-            if lf.Type == "LOG" {
-                ext = ".ldf"
-            }
-            // Формат: MOVE N'LogicalName' TO N'RestorePath\NewDBName_LogicalName.ext'
-            moveClause += fmt.Sprintf("MOVE N'%s' TO N'%s%s_%s%s'", lf.LogicalName, restorePath, newDBName, lf.LogicalName, ext)
-        }
-
-        // 4. Выполнение последовательности RESTORE
-
-        // Параметры для первого бэкапа (Full/Diff)
-        // firstBackupPath - это локальный путь, который успешно работает.
-        firstRestoreQuery := fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s' WITH %s, REPLACE, STATS = 1", newDBName, firstBackupPath, moveClause)
-        
-        // Первый файл всегда с NORECOVERY, чтобы можно было применить лог
-        firstRestoreQuery += ", NORECOVERY"
-        
-        LogDebug(fmt.Sprintf("Выполнение RESTORE DATABASE (1/%d): %s", len(filesToRestore), firstRestoreQuery))
-        if _, err := dbConn.Exec(firstRestoreQuery); err != nil {
-            LogError(fmt.Sprintf("Ошибка RESTORE DATABASE для %s (файл: %s): %v", newDBName, firstBackupPath, err))
-            return
-        }
-        LogInfo(fmt.Sprintf("База данных '%s' восстановлена из первого бэкапа '%s' с NORECOVERY.", newDBName, firstBackupPath))
-        
-        
-        // 5. Применение журналов транзакций и дифференциальных бэкапов
-        for i := 1; i < len(filesToRestore); i++ {
-            file := filesToRestore[i]
-            
-            // Если это ПОСЛЕДНИЙ файл в цепочке
-            isLastFile := (i == len(filesToRestore)-1)
-            
-            var restoreQuery string
-            
-            // ИСПОЛЬЗУЕМ TAGGED SWITCH ДЛЯ СТИЛИСТИЧЕСКОГО УЛУЧШЕНИЯ
-            switch file.Type {
-            case "trn":
-                restoreQuery = fmt.Sprintf("RESTORE LOG [%s] FROM DISK = N'%s'", newDBName, file.Path)
-            case "diff":
-                restoreQuery = fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s'", newDBName, file.Path)
-            default:
-                continue
-            }
-            
-
-            if isLastFile {
-                // Последний файл: STOPAT и RECOVERY
-                stopAtTimeStr := restoreTime.Format("2006-01-02 15:04:05")
-                restoreQuery += fmt.Sprintf(" WITH STOPAT = N'%s', RECOVERY", stopAtTimeStr)
-                LogDebug(fmt.Sprintf("Выполнение RESTORE LOG/DIFF (Последний с STOPAT): %s", restoreQuery))
-                
-                if _, err := dbConn.Exec(restoreQuery); err != nil {
-                    LogError(fmt.Sprintf("Ошибка RESTORE LOG/DIFF (STOPAT) для %s (файл: %s): %v", newDBName, file.Path, err))
-                    return
-                }
-                LogInfo(fmt.Sprintf("База данных '%s' успешно восстановлена на момент времени %s.", newDBName, stopAtTimeStr))
-            } else {
-                // Промежуточные файлы: NORECOVERY
-                if file.Type == "diff" {
-                    restoreQuery += " WITH NORECOVERY, STATS = 1"
-                } else {
-                    restoreQuery += " WITH NORECOVERY"
-                }
-                
-                LogDebug(fmt.Sprintf("Выполнение RESTORE LOG/DIFF (промежуточный %d/%d): %s", i+1, len(filesToRestore), restoreQuery))
-
-                if _, err := dbConn.Exec(restoreQuery); err != nil {
-                    LogError(fmt.Sprintf("Ошибка RESTORE LOG/DIFF для %s (файл: %s): %v", newDBName, file.Path, err))
-                    return
-                }
-                LogInfo(fmt.Sprintf("Применен бэкап '%s' с NORECOVERY.", file.Path))
-            }
-        }
-
-        // 6. Финальное восстановление, если не было логов (т.е. восстановлен только полный/дифф бэкап)
-        if len(filesToRestore) == 1 && restoreTime != nil {
-            // Если запрошен PIRT, но не было логов (только full/diff), нужно явно завершить.
-            finalRecoveryQuery := fmt.Sprintf("RESTORE DATABASE [%s] WITH RECOVERY", newDBName)
-            LogDebug(fmt.Sprintf("Завершение восстановления с RECOVERY: %s", finalRecoveryQuery))
-            if _, err := dbConn.Exec(finalRecoveryQuery); err != nil {
-                LogError(fmt.Sprintf("Ошибка завершения восстановления для %s: %v", newDBName, err))
-                return
-            }
-            LogInfo(fmt.Sprintf("База данных '%s' успешно восстановлена.", newDBName))
-        }
-
-        LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
-
-    }()
-
-    return nil
-}
-
-// Удаление базы данных
-func deleteDatabase(dbName string) error {
-    // Устанавливаем базу в SINGLE_USER, чтобы сбросить все соединения
-    singleUserQuery := fmt.Sprintf("ALTER DATABASE [%s] SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName)
-    if _, err := dbConn.Exec(singleUserQuery); err != nil {
-        return fmt.Errorf("ошибка перевода БД в SINGLE_USER: %w", err)
-    }
-
-    // Удаляем базу данных
-    deleteQuery := fmt.Sprintf("DROP DATABASE [%s]", dbName)
-    if _, err := dbConn.Exec(deleteQuery); err != nil {
-        return fmt.Errorf("ошибка DROP DATABASE: %w", err)
-    }
-
-    return nil
 }

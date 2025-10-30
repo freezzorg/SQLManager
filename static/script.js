@@ -1,11 +1,9 @@
 document.addEventListener('DOMContentLoaded', () => {
     const databaseList = document.getElementById('database-list');
-    console.log('databaseList (DOM element):', databaseList); // Добавлено логирование
     const deleteDbBtn = document.getElementById('delete-db-btn');
     const refreshDbBtn = document.getElementById('refresh-db-btn');
 
     const backupSelect = document.getElementById('backup-select');
-    console.log('backupSelect (DOM element):', backupSelect); // Добавлено логирование
     const refreshBackupsBtn = document.getElementById('refresh-backups-btn');
     const newDbNameInput = document.getElementById('new-db-name');
     const clearDbNameBtn = document.getElementById('clear-db-name-btn');
@@ -19,286 +17,321 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const briefLog = document.getElementById('brief-log');
 
-    let selectedDatabase = null; // Выбранная база данных в левой панели
-    let restoreInProgress = false; // Флаг для отслеживания процесса восстановления
+    let selectedDatabase = null; 
+    let restoreInProgress = false; 
 
-    // --- Функции для работы с базами данных ---
+    // --- Утилиты ---
+    
+    const addLogEntry = (message) => {
+        // Мы полагаемся на fetchBriefLog для реального лога, 
+        // но можем добавить немедленное сообщение для UX
+        console.log(message);
+    };
 
-    async function fetchDatabases() {
+    const fetchBriefLog = async () => {
+        try {
+            const response = await fetch('/api/log');
+            if (!response.ok) throw new Error('Ошибка получения лога');
+            const logEntries = await response.json();
+            
+            briefLog.innerHTML = '';
+            logEntries.reverse().forEach(entry => {
+                const p = document.createElement('p');
+                const time = new Date(entry.timestamp).toLocaleTimeString('ru-RU');
+                p.textContent = `[${time}] ${entry.message}`;
+                briefLog.appendChild(p);
+            });
+        } catch (error) {
+            console.error('Ошибка получения краткого лога:', error);
+        }
+    };
+    
+    // Функция для перехода по состояниям кнопок
+    const setRestoreButtonsState = (state) => {
+        // Скрываем все
+        restoreDbBtn.style.display = 'none';
+        confirmRestoreButtons.style.display = 'none';
+        cancelRestoreProcessBtn.style.display = 'none';
+
+        switch (state) {
+            case 'initial':
+                restoreDbBtn.style.display = 'block'; // Кнопка "Восстановить базу данных"
+                restoreInProgress = false;
+                break;
+            case 'confirm':
+                confirmRestoreButtons.style.display = 'flex'; // Кнопки "Восстановить" и "Отменить"
+                restoreInProgress = false;
+                break;
+            case 'in_progress':
+                cancelRestoreProcessBtn.style.display = 'block'; // Кнопка "Отменить восстановление"
+                restoreInProgress = true;
+                break;
+        }
+        fetchDatabases(); // Обновляем список баз, чтобы увидеть состояние RESTORING
+    };
+
+    // Форматирует объект Date в строку YYYY-MM-DD HH:MM:SS
+    function formatDateToBackend(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        const h = String(date.getHours()).padStart(2, '0');
+        const min = String(date.getMinutes()).padStart(2, '0');
+        const s = String(date.getSeconds()).padStart(2, '0');
+        // Формат: YYYY-MM-DD HH:MM:SS
+        return `${y}-${m}-${d} ${h}:${min}:${s}`;
+    }
+
+    // --- API Функции ---
+
+    const fetchDatabases = async () => {
+        // ... (логика получения и отображения списка баз данных)
         try {
             const response = await fetch('/api/databases');
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
             const databases = await response.json();
-            console.log('Полученные базы данных:', databases); // Добавлено логирование
-            renderDatabases(databases);
-        } catch (error) {
-            console.error('Ошибка при получении списка баз данных:', error);
-            addLogEntry(`ОШИБКА: Не удалось загрузить список баз данных: ${error.message}`);
-        }
-    }
 
-    function renderDatabases(databases) {
-        databaseList.innerHTML = '';
-        databases.forEach(db => {
-            const { name, state } = db; // Деструктуризация
-            console.log('Деструктурированные данные базы:', { name, state }); // Добавлено логирование
-            
-            const li = document.createElement('li');
-            li.appendChild(document.createTextNode(name)); // Используем createTextNode
-            li.dataset.dbName = name;
-
-            const statusIndicator = document.createElement('span');
-            statusIndicator.classList.add('status-indicator');
-            statusIndicator.classList.add(`status-${state}`); // Используем state напрямую
-            li.appendChild(statusIndicator);
-
-            li.addEventListener('click', () => {
-                // Снимаем выделение с предыдущей
-                if (selectedDatabase) {
-                    const prevSelected = databaseList.querySelector(`li[data-db-name="${selectedDatabase}"]`);
-                    if (prevSelected) {
-                        prevSelected.classList.remove('selected');
-                    }
-                }
-                // Выделяем текущую
-                li.classList.add('selected');
-                selectedDatabase = db.name;
-                newDbNameInput.value = db.name; // Копируем имя в поле ввода
+            databaseList.innerHTML = ''; // Очистка списка
+            databases.forEach(db => {
+                const li = document.createElement('li');
+                li.className = `db-item db-state-${db.state}`;
+                li.textContent = `${db.name} (${db.state})`;
+                
+                // Обработчик для выбора базы и копирования имени
+                li.addEventListener('click', () => {
+                    selectedDatabase = db.name;
+                    newDbNameInput.value = db.name; 
+                    
+                    // Убираем подсветку со всех элементов
+                    document.querySelectorAll('.db-item').forEach(item => {
+                        item.classList.remove('selected');
+                    });
+                    // Подсвечиваем выбранный
+                    li.classList.add('selected');
+                });
+                
+                databaseList.appendChild(li);
             });
-            databaseList.appendChild(li);
-        });
-    }
+            
+            // Если база находится в состоянии restoring, переводим кнопки в in_progress
+            if (databases.some(db => db.state === 'restoring')) {
+                setRestoreButtonsState('in_progress');
+            } else if (restoreInProgress) {
+                // Если флаг был true, но базы нет в restoring, значит восстановление завершено/остановлено
+                setRestoreButtonsState('initial');
+            }
 
-    async function deleteSelectedDatabase() {
+        } catch (error) {
+            console.error('Ошибка получения списка баз данных:', error);
+            addLogEntry(`ОШИБКА: Не удалось получить список баз данных: ${error.message}`);
+        }
+    };
+
+    const fetchBackups = async () => {
+        // ... (логика получения и отображения списка бэкапов)
+        try {
+            const response = await fetch('/api/backups');
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText);
+            }
+            const backups = await response.json();
+
+            backupSelect.innerHTML = '<option value="" disabled selected>Выберите бэкап</option>';
+            backups.forEach(backup => {
+                const option = document.createElement('option');
+                option.value = backup.baseName; // Имя директории
+                option.textContent = backup.baseName;
+                backupSelect.appendChild(option);
+            });
+        } catch (error) {
+            console.error('Ошибка получения списка бэкапов:', error);
+            addLogEntry(`ОШИБКА: Не удалось получить список бэкапов: ${error.message}`);
+        }
+    };
+    
+    // Функция удаления базы данных
+    const deleteDatabase = async () => {
         if (!selectedDatabase) {
             alert('Пожалуйста, выберите базу данных для удаления.');
             return;
         }
-
-        if (confirm(`База данных '${selectedDatabase}' будет удалена. Продолжить?`)) {
-            try {
-                const response = await fetch(`/api/delete?name=${selectedDatabase}`, {
-                    method: 'DELETE',
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                addLogEntry(`База данных '${selectedDatabase}' успешно удалена.`);
-                selectedDatabase = null; // Сбрасываем выбор
-                fetchDatabases(); // Обновляем список
-            } catch (error) {
-                console.error('Ошибка при удалении базы данных:', error);
-                addLogEntry(`ОШИБКА: Не удалось удалить базу данных '${selectedDatabase}': ${error.message}`);
-            }
-        }
-    }
-
-    // --- Функции для работы с бэкапами ---
-
-    async function fetchBackups() {
-        try {
-            const response = await fetch('/api/backups');
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const backups = await response.json();
-            console.log('Полученные бэкапы:', backups); // Добавлено логирование
-            renderBackups(backups);
-        } catch (error) {
-            console.error('Ошибка при получении списка бэкапов:', error);
-            addLogEntry(`ОШИБКА: Не удалось загрузить список бэкапов: ${error.message}`);
-        }
-    }
-
-    function renderBackups(backups) {
-        backupSelect.innerHTML = '';
-        if (!backups || backups.length === 0) { // Проверяем на null или пустой массив
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'Бэкапы не найдены';
-            backupSelect.appendChild(option);
+        if (!confirm(`Вы действительно хотите удалить базу данных '${selectedDatabase}'?`)) {
             return;
         }
-        backups.forEach(backup => {
-            const { baseName } = backup; // <-- ИСПРАВЛЕНО: Деструктуризация на 'baseName'
-            console.log('Деструктурированные данные бэкапа:', { baseName }); // Добавлено логирование
-            
-            const option = document.createElement('option');
-            option.value = baseName; // Имя директории (название базы)
-            option.appendChild(document.createTextNode(baseName)); // <-- ИСПРАВЛЕНО: используем baseName
-            backupSelect.appendChild(option);
-        });
-    }
-
-    // --- Функции для восстановления ---
-
-    function setRestoreButtonsState(state) {
-        if (state === 'initial') {
-            restoreDbBtn.style.display = 'block';
-            confirmRestoreButtons.style.display = 'none';
-            cancelRestoreProcessBtn.style.display = 'none';
-            restoreInProgress = false;
-        } else if (state === 'confirm') {
-            restoreDbBtn.style.display = 'none';
-            confirmRestoreButtons.style.display = 'flex';
-            cancelRestoreProcessBtn.style.display = 'none';
-            restoreInProgress = false;
-        } else if (state === 'restoring') {
-            restoreDbBtn.style.display = 'none';
-            confirmRestoreButtons.style.display = 'none';
-            cancelRestoreProcessBtn.style.display = 'block';
-            restoreInProgress = true;
-        }
-    }
-
-    async function startRestoreProcess() {
-        // Имя директории бэкапа
-        const backupBaseName = backupSelect.value; // <-- Имя переменной в JS должно быть baseName или backupBaseName
-        const newDbName = newDbNameInput.value.trim();
-        let restoreDateTime = restoreDatetimeInput.value;
-
-        if (!backupBaseName) {
-            alert('Пожалуйста, выберите файл бэкапа.');
-            return;
-        }
-        if (!newDbName) {
-            alert('Пожалуйста, введите имя восстанавливаемой базы данных.');
-            return;
-        }
-
-        // Форматируем дату/время для Go-бэкенда (DD.MM.YYYY HH:MM:SS)
-        if (restoreDateTime) {
-            const dt = new Date(restoreDateTime);
-            
-            // Проверка, что дата корректна
-            if (isNaN(dt)) {
-                alert('Неверный формат даты/времени для восстановления.');
-                return;
-            }
-            
-            // Форматируем в DD.MM.YYYY HH:MM:SS
-            restoreDateTime = `${dt.getDate().toString().padStart(2, '0')}.${(dt.getMonth() + 1).toString().padStart(2, '0')}.${dt.getFullYear()} ${dt.getHours().toString().padStart(2, '0')}:${dt.getMinutes().toString().padStart(2, '0')}:${dt.getSeconds().toString().padStart(2, '0')}`;
-        }
-
 
         try {
-            const response = await fetch('/api/restore', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    backupBaseName: backupBaseName, // <-- Передаем как baseName
-                    newDbName: newDbName,
-                    restoreDateTime: restoreDateTime,
-                }),
+            const response = await fetch(`/api/delete?name=${encodeURIComponent(selectedDatabase)}`, {
+                method: 'DELETE',
             });
 
             if (!response.ok) {
                 const errorText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
             }
 
-            addLogEntry(`Запрос на восстановление базы '${newDbName}' принят.`);
-            setRestoreButtonsState('restoring');
-            fetchDatabases(); // Обновляем список баз, чтобы увидеть состояние RESTORING
+            const result = await response.json();
+            addLogEntry(`УСПЕХ: ${result.message}`);
+            selectedDatabase = null; // Сброс выбранной базы
+            fetchDatabases();
         } catch (error) {
-            console.error('Ошибка при запуске восстановления:', error);
-            addLogEntry(`ОШИБКА: Не удалось запустить восстановление базы '${newDbName}': ${error.message}`);
-            setRestoreButtonsState('initial'); // Возвращаем кнопки в исходное состояние
+            console.error('Ошибка удаления базы данных:', error);
+            addLogEntry(`ОШИБКА: Не удалось удалить базу данных: ${error.message}`);
         }
-    }
+    };
 
-    async function cancelRestore() {
-        if (!restoreInProgress) {
-            alert('Нет активного процесса восстановления для отмены.');
+
+    // Функция запуска восстановления
+    async function startRestoreProcess() {
+        const backupBaseName = backupSelect.value;
+        const newDbName = newDbNameInput.value.trim();
+        let restoreDateTime = restoreDatetimeInput.value.trim();
+        let formattedDateTime = "";
+        
+        if (restoreInProgress) {
+            addLogEntry("Предупреждение: Процесс восстановления уже запущен.");
             return;
         }
 
+        if (!backupBaseName || !newDbName) {
+            alert('Пожалуйста, выберите директорию бэкапа и введите имя восстанавливаемой базы данных.');
+            return;
+        }
+        
+        // --- ИСПРАВЛЕНИЕ ЛОГИКИ ПАРСИНГА ДАТЫ/ВРЕМЕНИ ---
+        if (restoreDateTime !== "") {
+            try {
+                // 1. Обработка формата YYYY-MM-DDTHH:MM (от datetime-local, без секунд)
+                if (restoreDateTime.includes('T')) {
+                    // Заменяем 'T' на пробел и добавляем секунды. 
+                    // Пример: '2025-10-29T15:03' -> '2025-10-29 15:03:00'
+                    formattedDateTime = restoreDateTime.replace('T', ' ') + ':00';
+                } 
+                // 2. Обработка формата YYYY-MM-DD HH:MM (введен вручную, без секунд)
+                else if (restoreDateTime.split(' ').length === 2 && restoreDateTime.split(':').length === 2 && restoreDateTime.split(':').length === 2) {
+                    // Если формат 'YYYY-MM-DD HH:MM' (введен вручную без секунд)
+                    formattedDateTime = restoreDateTime + ':00';
+                } 
+                // 3. Предполагаем, что это уже корректный формат YYYY-MM-DD HH:MM:SS (включая нажатие "Сейчас")
+                else {
+                    formattedDateTime = restoreDateTime;
+                }
+
+                if (!formattedDateTime.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)) {
+                    throw new Error("Не соответствует формату ГГГГ-ММ-ДД ЧЧ:ММ:СС");
+                }
+                
+                addLogEntry(`Восстановление на момент времени (PIRT) будет выполнено до: ${formattedDateTime}`);
+
+            } catch (e) {
+                console.error("Ошибка форматирования даты:", e);
+                addLogEntry(`ОШИБКА: Не удалось обработать дату/время: ${restoreDateTime}. Убедитесь, что формат: ГГГГ-ММ-ДД ЧЧ:ММ:СС`);
+                return;
+            }
+        } 
+        // Если restoreDateTime пуст, formattedDateTime остается "", и бэкенд восстановит до последнего бэкапа.
+        
+        // --- Отправка запроса ---
+        addLogEntry(`Запуск восстановления базы данных '${newDbName}' из бэкапа '${backupBaseName}'...`);
+        setRestoreButtonsState('restoring'); // Устанавливаем кнопку "Отменить восстановление"
+
+        const requestBody = {
+            backupBaseName: backupBaseName,
+            newDbName: newDbName,
+            restoreDateTime: formattedDateTime // Отправляем отформатированную строку (или "" если не задана)
+        };
+
+        try {
+            restoreInProgress = true;
+            const response = await fetch('/api/restore', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (response.ok) {
+                addLogEntry(`УСПЕХ: Запрос на восстановление базы '${newDbName}' отправлен. Отслеживайте статус.`);
+            } else {
+                const errorText = await response.text();
+                addLogEntry(`ОШИБКА: Не удалось запустить восстановление. Сервер вернул: ${response.status} - ${errorText}`);
+                console.error('Ошибка восстановления:', errorText);
+                setRestoreButtonsState('initial'); // Возвращаемся в исходное состояние при ошибке
+            }
+        } catch (error) {
+            addLogEntry(`КРИТИЧЕСКАЯ ОШИБКА: Проблема с сетевым запросом: ${error.message}`);
+            console.error('Сетевая ошибка:', error);
+            setRestoreButtonsState('initial'); 
+        }
+    }
+
+    // Функция отмены восстановления
+    const cancelRestore = async () => {
         const dbName = newDbNameInput.value.trim();
         if (!dbName) {
-            alert('Имя восстанавливаемой базы данных не указано.');
+            alert('Невозможно отменить: имя восстанавливаемой базы не определено.');
+            setRestoreButtonsState('initial');
             return;
         }
 
-        if (confirm(`Восстанавливаемая база '${dbName}' станет нерабочей и будет удалена. Хотите отменить восстановление?`)) {
-            try {
-                const response = await fetch(`/api/cancel-restore?name=${dbName}`, {
-                    method: 'DELETE',
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                addLogEntry(`Восстановление базы данных '${dbName}' отменено (БД удалена).`);
-                setRestoreButtonsState('initial');
-                fetchDatabases(); // Обновляем список баз
-            } catch (error) {
-                console.error('Ошибка при отмене восстановления:', error);
-                addLogEntry(`ОШИБКА: Не удалось отменить восстановление базы '${dbName}': ${error.message}`);
-            }
+        // Вывод окна с предупреждением
+        if (!confirm(`Восстанавливаемая база станет не рабочей и будет удалена. Хотите отменить восстановление базы данных '${dbName}'?`)) {
+            addLogEntry('Отказ от отмены. Восстановление продолжается.');
+            return; // Отказ от отмены
         }
-    }
 
-    // --- Функции для лога ---
-
-    async function fetchBriefLog() {
+        addLogEntry(`Отмена восстановления и удаление базы данных '${dbName}'...`);
+        
         try {
-            const response = await fetch('/api/log');
+            // ИСПРАВЛЕНО: API-маршрут /api/cancel-restore и метод POST
+            const response = await fetch(`/api/cancel-restore?name=${encodeURIComponent(dbName)}`, { 
+                method: 'POST',
+            });
+
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                const errorText = await response.text();
+                throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
             }
-            const logEntries = await response.json();
-            renderBriefLog(logEntries);
+
+            const result = await response.json();
+            addLogEntry(`УСПЕХ: ${result.message}`);
+            
         } catch (error) {
-            console.error('Ошибка при получении краткого лога:', error);
-            // Не добавляем в лог, чтобы избежать рекурсии
+            console.error('Ошибка отмены восстановления:', error);
+            addLogEntry(`ОШИБКА: Не удалось отменить восстановление: ${error.message}`);
+        } finally {
+            setRestoreButtonsState('initial'); // Всегда возвращаемся в исходное состояние
         }
-    }
+    };
 
-    function renderBriefLog(logEntries) {
-        briefLog.innerHTML = '';
-        logEntries.forEach(entry => {
-            const li = document.createElement('li');
-            const timestamp = new Date(entry.Timestamp).toLocaleString();
-            li.textContent = `${timestamp} ${entry.Message}`;
-            briefLog.appendChild(li);
-        });
-        briefLog.scrollTop = briefLog.scrollHeight; // Прокрутка вниз
-    }
-
-    function addLogEntry(message) {
-        // Добавляем запись в краткий лог на клиенте
-        const li = document.createElement('li');
-        const timestamp = new Date().toLocaleString();
-        li.textContent = `${timestamp} ${message}`;
-        briefLog.appendChild(li);
-        briefLog.scrollTop = briefLog.scrollHeight; // Прокрутка вниз
-    }
 
     // --- Обработчики событий ---
 
     refreshDbBtn.addEventListener('click', fetchDatabases);
-    deleteDbBtn.addEventListener('click', deleteSelectedDatabase);
-
+    deleteDbBtn.addEventListener('click', deleteDatabase);
     refreshBackupsBtn.addEventListener('click', fetchBackups);
+    
+    // Кнопка "Очистить" имя базы
     clearDbNameBtn.addEventListener('click', () => {
         newDbNameInput.value = '';
     });
+
+    // Кнопка "Сейчас"
     setCurrentDatetimeBtn.addEventListener('click', () => {
         const now = new Date();
-        const year = now.getFullYear();
-        const month = (now.getMonth() + 1).toString().padStart(2, '0');
-        const day = now.getDate().toString().padStart(2, '0');
-        const hours = now.getHours().toString().padStart(2, '0');
-        const minutes = now.getMinutes().toString().padStart(2, '0');
-        // datetime-local не поддерживает секунды, поэтому обрезаем
-        restoreDatetimeInput.value = `${year}-${month}-${day}T${hours}:${minutes}`;
+        restoreDatetimeInput.value = formatDateToBackend(now);
+        restoreDatetimeInput.focus(); // Для лучшего UX
+        addLogEntry('Установлено текущее время для восстановления.');
     });
 
+    // Основная кнопка "Восстановить базу данных"
     restoreDbBtn.addEventListener('click', async () => {
+        const selectedBackup = backupSelect.value;
         const newDbName = newDbNameInput.value.trim();
+        if (!selectedBackup) {
+            alert('Пожалуйста, выберите бэкап.');
+            return;
+        }
         if (!newDbName) {
             alert('Пожалуйста, введите имя восстанавливаемой базы данных.');
             return;
@@ -308,15 +341,14 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/api/databases');
             const databases = await response.json();
-            const dbExists = databases.some(db => db.name === newDbName);
+            const dbExists = databases.some(db => db.name.toLowerCase() === newDbName.toLowerCase());
 
             if (dbExists) {
-                if (confirm(`Вы действительно хотите восстановить бэкап в существующую базу '${newDbName}'?`)) {
-                    setRestoreButtonsState('confirm');
-                } else {
-                    setRestoreButtonsState('initial');
-                }
+                // Если существует, переключаемся в режим подтверждения
+                addLogEntry(`База данных '${newDbName}' существует. Ожидание подтверждения перезаписи.`);
+                setRestoreButtonsState('confirm');
             } else {
+                // Если не существует, запускаем восстановление сразу
                 startRestoreProcess();
             }
         } catch (error) {
@@ -326,15 +358,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    confirmRestoreBtn.addEventListener('click', startRestoreProcess);
+    // Кнопки режима подтверждения
+    confirmRestoreBtn.addEventListener('click', startRestoreProcess); // "Восстановить"
     cancelConfirmRestoreBtn.addEventListener('click', () => {
-        setRestoreButtonsState('initial');
+        addLogEntry('Восстановление отменено пользователем (на этапе подтверждения).');
+        setRestoreButtonsState('initial'); // "Отменить"
     });
+    
+    // Кнопка отмены во время процесса
     cancelRestoreProcessBtn.addEventListener('click', cancelRestore);
 
-    // --- Инициализация ---
+    // --- Инициализация ---\
     fetchDatabases();
     fetchBackups();
     fetchBriefLog();
+    setInterval(fetchDatabases, 10000); // Обновляем список БД
     setInterval(fetchBriefLog, 5000); // Обновляем лог каждые 5 секунд
 });

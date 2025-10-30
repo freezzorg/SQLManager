@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	// Используем стандартный драйвер для MSSQL
 	_ "github.com/denisenkom/go-mssqldb"
 	"gopkg.in/yaml.v3"
 )
@@ -31,6 +32,7 @@ func main() {
     var err error
     dbConn, err = setupDBConnection(appConfig.MSSQL)
     if err != nil {
+        // Мы используем LogError, который пишет и в файл, и в консоль
         LogError(fmt.Sprintf("Ошибка подключения к SQL Server (%s): %v", appConfig.MSSQL.Server, err))
         return
     }
@@ -42,14 +44,14 @@ func main() {
 
 // Загружает конфигурацию из файла
 func loadConfig(path string) error {
-    data, err := os.ReadFile(path)
-    if err != nil {
-        return err
-    }
-    return yaml.Unmarshal(data, &appConfig)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return yaml.Unmarshal(data, &appConfig)
 }
 
-// Устанавливает соединение с MSSQL
+// Устанавливает соединение с SQL Server
 func setupDBConnection(cfg struct {
 	Server   string `yaml:"server"`
 	Port     int    `yaml:"port"`
@@ -74,19 +76,21 @@ func setupDBConnection(cfg struct {
 // Запускает веб-сервер
 func startWebServer(addr string) {
     // Настройка маршрутов
+    // Обслуживание статических файлов из директории "static"
     http.Handle("/", http.FileServer(http.Dir("./static")))
     
     // API маршруты:
-    // handleStartRestore (бывший handleRestoreDatabase) и handleCancelRestoreProcess (бывший handleCancelRestore)
     http.HandleFunc("/api/databases", authMiddleware(handleGetDatabases))
     http.HandleFunc("/api/delete", authMiddleware(handleDeleteDatabase)) 
     http.HandleFunc("/api/backups", authMiddleware(handleGetBackups))
+    // ИСПРАВЛЕНО: Обновленный маршрут для запуска восстановления
     http.HandleFunc("/api/restore", authMiddleware(handleStartRestore)) 
     http.HandleFunc("/api/log", authMiddleware(handleGetBriefLog))
+    // ИСПРАВЛЕНО: Обновленный маршрут для отмены восстановления
     http.HandleFunc("/api/cancel-restore", authMiddleware(handleCancelRestoreProcess)) 
 
     LogInfo(fmt.Sprintf("Веб-сервер запущен на %s", addr))
-    
+    // Запускаем веб-сервер
     if err := http.ListenAndServe(addr, nil); err != nil {
         LogError(fmt.Sprintf("Ошибка запуска веб-сервера: %v", err))
     }

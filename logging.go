@@ -28,7 +28,7 @@ func setupLogger(logFile string, level string) {
         log.Fatalf("Не удалось создать каталог для лог-файла: %v", err)
     }
 
-    // Настройка файла логов [cite: 15]
+    // Настройка файла логов
     file, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
     if err != nil {
         log.Fatalf("Не удалось открыть лог-файл: %v", err)
@@ -65,19 +65,13 @@ func LogDebug(message string) {
 func LogInfo(message string) {
     if currentLogLevel >= 1 {
         fileLogger.Printf("[INFO] %s", message)
-        recordBriefLog(message) // Запись в краткий лог [cite: 16]
+        recordBriefLog(message) // Запись в краткий лог
     }
 }
 
 // Функция логирования ERROR
 func LogError(message string) {
+    // ERROR логируется всегда
     fileLogger.Printf("[ERROR] %s", message)
-    recordBriefLog("ОШИБКА: " + message) // Запись в краткий лог [cite: 16]
-}
-
-// Функция логирования WARNING (можно использовать для неосновных ошибок)
-func LogWarning(message string) {
-    if currentLogLevel >= 1 {
-        fileLogger.Printf("[WARNING] %s", message)
-    }
+    recordBriefLog("ОШИБКА: " + message) // Запись в краткий лог
 }
