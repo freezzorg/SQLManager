@@ -69,7 +69,7 @@ func getBackupLogicalFiles(backupPath string) ([]BackupLogicalFile, error) {
     for rows.Next() {
         // Переменные для нужных нам столбцов
         var logicalName, physicalName, fileType string
-        var fileGroupName sql.NullString // ИСПРАВЛЕНО: FileGroupName может быть NULL
+        var fileGroupName sql.NullString
 
         // Инициализация аргументов сканирования. Нам нужны первые 4, остальные - заглушки.
         scanArgs := make([]interface{}, numColumns)
@@ -111,7 +111,6 @@ func getBackupLogicalFiles(backupPath string) ([]BackupLogicalFile, error) {
 
     return logicalFiles, nil
 }
-
 
 // Определяет последовательность бэкапов для восстановления на указанный момент времени
 func getRestoreSequence(baseName string, restoreTime *time.Time) ([]BackupFileSequence, error) {
@@ -189,13 +188,17 @@ func getRestoreSequence(baseName string, restoreTime *time.Time) ([]BackupFileSe
 	filesToRestore := make([]BackupFileSequence, 0)
 	
 	// Всегда добавляем полный бэкап
-	filesToRestore = append(filesToRestore, allFiles[fullIndex]) 
+	filesToRestore = append(filesToRestore, allFiles[fullIndex])
+    if fullIndex != -1 {
+        LogDebug(fmt.Sprintf("Бэкап полный: %s", allFiles[fullIndex].Path))
+    }
 
 	// Если найден дифференциальный бэкап, добавляем его сразу после полного
 	lastIndex := fullIndex
 	if diffIndex != -1 {
 		filesToRestore = append(filesToRestore, allFiles[diffIndex])
 		lastIndex = diffIndex
+        LogDebug(fmt.Sprintf("Бэкап дифференциальный: %s", allFiles[diffIndex].Path))
 	}
 
 	// 5. Добавляем бэкапы журналов транзакций (.trn) после последнего добавленного файла (full или diff)
@@ -207,6 +210,7 @@ func getRestoreSequence(baseName string, restoreTime *time.Time) ([]BackupFileSe
 				continue
 			}
 			filesToRestore = append(filesToRestore, file)
+            LogDebug(fmt.Sprintf("Бэкап журнала транзакций: %s", file.Path))
 		}
 	}
     
@@ -326,22 +330,24 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 
 // Удаление базы данных
 func deleteDatabase(dbName string) error {
-    LogDebug(fmt.Sprintf("Удаление базы данных %s...", dbName))
-    // Устанавливаем базу в SINGLE_USER, чтобы сбросить все соединения
+    // 1. Попытка перевести базу в SINGLE_USER, чтобы сбросить соединения.
     singleUserQuery := fmt.Sprintf("ALTER DATABASE [%s] SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName)
+    LogDebug(fmt.Sprintf("Попытка перевести БД '%s' в SINGLE_USER...", dbName))
     if _, err := dbConn.Exec(singleUserQuery); err != nil {
-        return fmt.Errorf("ошибка перевода БД в SINGLE_USER: %w", err)
+        // Логируем ошибку, но не возвращаем её, чтобы перейти к DROP DATABASE
+        LogError(fmt.Sprintf("Ошибка перевода БД '%s' в SINGLE_USER: %v", dbName, err))
     }
 
-    // Удаляем базу данных
+    // 2. Удаляем базу данных. DROP DATABASE работает для баз в RESTORING режиме, 
+    // если нет активных сессий (которые мы пытались сбросить выше).
     deleteQuery := fmt.Sprintf("DROP DATABASE [%s]", dbName)
+    LogDebug(fmt.Sprintf("Выполнение DROP DATABASE [%s]", dbName))
     if _, err := dbConn.Exec(deleteQuery); err != nil {
-        return fmt.Errorf("ошибка DROP DATABASE: %w", err)
+        // Если DROP DATABASE не сработал, возвращаем ошибку.
+        return fmt.Errorf("ошибка DROP DATABASE для БД %s: %w", dbName, err)
     }
-
     return nil
 }
-
 
 // Отмена восстановления (УДАЛЯЕТ БД, так как она неработоспособна)
 func cancelRestoreProcess(dbName string) error {
