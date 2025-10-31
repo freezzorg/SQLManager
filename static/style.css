@@ -2,9 +2,9 @@ body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: 
 #container { display: flex; flex-direction: column; width: 100%; margin: 0 auto; height: 100vh; } /* Ширина 100%, высота 100vh */
 #main { display: flex; flex: 1; }
 #left-frame, #right-frame { border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; }
-#left-frame { width: 420px; flex-shrink: 0; height: calc(80vh - 10px); display: flex; flex-direction: column; overflow-x: hidden; } /* Фиксированная ширина 420px, не сжимается */
-#right-frame { width: calc(100% - 420px); flex-grow: 1; height: calc(80vh - 10px); display: flex; flex-direction: column; } /* Занимает оставшееся пространство */
-#bottom-frame { height: calc(20vh - 10px); border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; overflow-y: auto; } /* Высота 20vh */
+#left-frame { width: 420px; flex-shrink: 0; height: calc(40vh - 10px); display: flex; flex-direction: column; overflow-x: hidden; } /* Фиксированная ширина 420px, не сжимается */
+#right-frame { width: calc(100% - 420px); flex-grow: 1; height: calc(40vh - 10px); display: flex; flex-direction: column; } /* Занимает оставшееся пространство */
+#bottom-frame { height: calc(60vh - 10px); border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; overflow-y: auto; } /* Высота 60vh */
 h2 { margin: 0 0 20px 0; font-weight: bold; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
 ul { list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
 li { 

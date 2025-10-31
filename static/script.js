@@ -13,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmRestoreButtons = document.getElementById('confirm-restore-buttons');
     const confirmRestoreBtn = document.getElementById('confirm-restore-btn');
     const cancelConfirmRestoreBtn = document.getElementById('cancel-confirm-restore-btn');
-    const cancelRestoreProcessBtn = document.getElementById('cancel-restore-process-btn');
 
     const briefLog = document.getElementById('brief-log');
     const restoreForm = document.getElementById('restore-form'); // Добавляем ссылку на форму
@@ -27,11 +26,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Утилиты ---
 
+    const formatLogTime = (date) => {
+        const d = String(date.getDate()).padStart(2, '0');
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const y = date.getFullYear();
+        const h = String(date.getHours()).padStart(2, '0');
+        const min = String(date.getMinutes()).padStart(2, '0');
+        const s = String(date.getSeconds()).padStart(2, '0');
+        return `${d}.${m}.${y} ${h}:${min}:${s}`;
+    };
+
     const addLogEntry = (message) => {
         console.log(message);
         const li = document.createElement('li');
-        const time = new Date().toLocaleTimeString('ru-RU');
-        li.textContent = `[${time}] ${message}`;
+        const time = formatLogTime(new Date());
+        li.textContent = `${time} ${message}`;
         briefLog.prepend(li);
         while (briefLog.children.length > 100) {
             briefLog.removeChild(briefLog.lastChild);
@@ -47,8 +56,8 @@ document.addEventListener('DOMContentLoaded', () => {
             briefLog.innerHTML = '';
             logEntries.reverse().forEach(entry => {
                 const li = document.createElement('li');
-                const time = new Date(entry.timestamp).toLocaleTimeString('ru-RU');
-                li.textContent = `[${time}] ${entry.message}`;
+                const time = formatLogTime(new Date(entry.timestamp));
+                li.textContent = `${time} ${entry.message}`;
                 briefLog.appendChild(li);
             });
         } catch (error) {
@@ -86,12 +95,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const fetchDatabases = async () => {
         try {
             const response = await fetch('/api/databases');
+            if (!response.ok) {
+                throw new Error(`Ошибка сервера: ${response.status}`);
+            }
             const databases = await response.json();
 
+            // Очищаем список перед добавлением новых элементов
+            databaseList.innerHTML = ''; 
+
             const currentDbElements = new Map();
-            databaseList.querySelectorAll('li.db-item').forEach(li => {
-                currentDbElements.set(li.dataset.dbname, li);
-            });
+            // databaseList.querySelectorAll('li.db-item').forEach(li => { // Этот блок больше не нужен, так как список очищается
+            //     currentDbElements.set(li.dataset.dbname, li);
+            // });
 
             const restoringDbs = []; // Для отслеживания баз в процессе восстановления
             const newDbNames = new Set(databases.map(db => db.name));
@@ -114,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     databaseList.appendChild(li); // Добавляем новый элемент в список
                 } else {
-                    currentDbElements.delete(db.name); // Удаляем из карты, чтобы отслеживать удаленные
+                    // currentDbElements.delete(db.name); // Этот блок больше не нужен, так как список очищается
                 }
 
                 // Обновляем классы и содержимое
@@ -183,15 +198,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            // Удаляем элементы, которых больше нет в списке баз данных
-            currentDbElements.forEach(li => {
-                databaseList.removeChild(li);
-                // Останавливаем опрос, если он был активен для удаленной БД
-                if (activeRestorePollers[li.dataset.dbname]) {
-                    clearInterval(activeRestorePollers[li.dataset.dbname]);
-                    delete activeRestorePollers[li.dataset.dbname];
-                }
-            });
+            // Удаляем элементы, которых больше нет в списке баз данных (этот блок больше не нужен, так как список очищается)
+            // currentDbElements.forEach(li => {
+            //     databaseList.removeChild(li);
+            //     // Останавливаем опрос, если он был активен для удаленной БД
+            //     if (activeRestorePollers[li.dataset.dbname]) {
+            //         clearInterval(activeRestorePollers[li.dataset.dbname]);
+            //         delete activeRestorePollers[li.dataset.dbname];
+            //     }
+            // });
 
             // Запускаем/останавливаем опрос прогресса для восстанавливаемых баз
             Object.keys(activeRestorePollers).forEach(dbName => {
@@ -208,19 +223,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            // Обновляем состояние главной кнопки отмены, если есть активные восстановления
-            if (restoringDbs.length > 0) {
-                cancelRestoreProcessBtn.style.display = 'block';
-                if (restoringDbs.includes(newDbNameInput.value.trim())) {
-                    cancelRestoreProcessBtn.dataset.dbname = newDbNameInput.value.trim();
-                } else {
-                    cancelRestoreProcessBtn.dataset.dbname = restoringDbs[0];
-                }
-            } else {
-                cancelRestoreProcessBtn.style.display = 'none';
-            }
-
-
         } catch (error) {
             console.error('Ошибка получения списка баз данных:', error);
             addLogEntry(`ОШИБКА: Не удалось получить список баз данных: ${error.message}`);
@@ -236,6 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const backups = await response.json();
 
+            // Очищаем список перед добавлением новых элементов
             backupSelect.innerHTML = '<option value="" disabled selected>Выберите бэкап</option>';
             backups.forEach(backup => {
                 const option = document.createElement('option');
@@ -269,12 +272,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const result = await response.json();
-            addLogEntry(`УСПЕХ: ${result.message}`);
+            addLogEntry(`Удаление базы '${dbName}' успешно завершено`);
             selectedDatabase = null;
             fetchDatabases();
         } catch (error) {
             console.error('Ошибка удаления базы данных:', error);
-            addLogEntry(`ОШИБКА: Не удалось удалить базу данных: ${error.message}`);
+            addLogEntry(`ОШИБКА: Не удалось удалить базу данных '${dbName}': ${error.message}`);
         }
     };
 
@@ -302,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 formattedDateTime = formatDateToBackend(dateObj);
 
-                addLogEntry(`Восстановление на момент времени (PIRT) будет выполнено до: ${formattedDateTime}`);
+                // addLogEntry(`Восстановление на момент времени (PIRT) будет выполнено до: ${formattedDateTime}`); // Удаляем, так как это будет частью основного сообщения
 
             } catch (e) {
                 console.error("Ошибка форматирования даты:", e);
@@ -311,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        addLogEntry(`Запуск восстановления базы данных '${newDbName}' из бэкапа '${backupBaseName}'...`);
+        addLogEntry(`Начато восстановление базы '${newDbName}' из бэкапа '${backupBaseName}'${formattedDateTime ? ` на ${formattedDateTime}` : ''}`);
         // setRestoreButtonsState('in_progress'); // Удаляем, так как состояние будет управляться через fetchDatabases
 
         const requestBody = {
@@ -332,19 +335,19 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (response.ok) {
-                addLogEntry(`УСПЕХ: Запрос на восстановление базы '${newDbName}' отправлен. Отслеживайте статус.`);
+                // addLogEntry(`УСПЕХ: Запрос на восстановление базы '${newDbName}' отправлен. Отслеживайте статус.`); // Удаляем, так как основное сообщение уже есть
                 // Сразу запускаем опрос прогресса для этой базы
                 startRestoreProgressPolling(newDbName);
                 fetchDatabases(); // Обновляем список баз, чтобы увидеть статус "restoring"
             } else {
                 const errorText = await response.text();
-                addLogEntry(`ОШИБКА: Не удалось запустить восстановление. Сервер вернул: ${response.status} - ${errorText}`);
+                addLogEntry(`ОШИБКА: Не удалось запустить восстановление базы '${newDbName}'. Сервер вернул: ${response.status} - ${errorText}`);
                 console.error('Ошибка восстановления:', errorText);
                 // setRestoreButtonsState('initial'); // Удаляем
                 fetchDatabases(); // Обновляем список баз
             }
         } catch (error) {
-            addLogEntry(`КРИТИЧЕСКАЯ ОШИБКА: Проблема с сетевым запросом: ${error.message}`);
+            addLogEntry(`КРИТИЧЕСКАЯ ОШИБКА: Проблема с сетевым запросом при восстановлении базы '${newDbName}': ${error.message}`);
             console.error('Сетевая ошибка:', error);
             // setRestoreButtonsState('initial'); // Удаляем
             fetchDatabases(); // Обновляем список баз
@@ -359,11 +362,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!confirm(`Восстанавливаемая база станет не рабочей и будет удалена. Хотите отменить восстановление базы данных '${dbName}'?`)) {
-            addLogEntry('Отказ от отмены. Восстановление продолжается.');
+            // addLogEntry('Отказ от отмены. Восстановление продолжается.'); // Удаляем, так как это не критичное сообщение
             return;
         }
 
-        addLogEntry(`Отмена восстановления и удаление базы данных '${dbName}'...`);
+        addLogEntry(`Отмена восстановления базы данных '${dbName}'...`);
 
         try {
             const response = await fetch(`/api/cancel-restore?name=${encodeURIComponent(dbName)}`, {
@@ -376,7 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const result = await response.json();
-            addLogEntry(`УСПЕХ: ${result.message}`);
+            addLogEntry(`Отмена восстановления базы '${dbName}' успешно завершена`);
             // Останавливаем опрос прогресса для этой базы
             if (activeRestorePollers[dbName]) {
                 clearInterval(activeRestorePollers[dbName]);
@@ -405,7 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const now = new Date();
         restoreDatetimeInput.value = formatDateToInput(now);
         restoreDatetimeInput.focus();
-        addLogEntry('Установлено текущее время для восстановления.');
+        // addLogEntry('Установлено текущее время для восстановления.'); // Удаляем
     });
 
     // Обработчик отправки формы
@@ -428,7 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (dbExists) {
                 // Если существует, переключаемся в режим подтверждения
-                addLogEntry(`База данных '${newDbName}' существует. Ожидание подтверждения перезаписи.`);
+                // addLogEntry(`База данных '${newDbName}' существует. Ожидание подтверждения перезаписи.`); // Удаляем
                 // setRestoreButtonsState('confirm'); // Удаляем, управляем видимостью напрямую
                 confirmRestoreButtons.style.display = 'flex';
                 confirmationSection.style.display = 'block';
@@ -442,7 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('Ошибка при проверке существования БД перед восстановлением:', error);
-            addLogEntry(`ОШИБКА: Не удалось проверить существование БД: ${error.message}`);
+            addLogEntry(`ОШИБКА: Не удалось проверить существование БД '${newDbName}' перед восстановлением: ${error.message}`);
             // setRestoreButtonsState('initial'); // Удаляем
             confirmRestoreButtons.style.display = 'none';
             confirmationSection.style.display = 'none';
@@ -457,17 +460,11 @@ document.addEventListener('DOMContentLoaded', () => {
         restoreDbBtn.style.display = 'block';
     });
     cancelConfirmRestoreBtn.addEventListener('click', () => {
-        addLogEntry('Восстановление отменено пользователем (на этапе подтверждения).');
+        // addLogEntry('Восстановление отменено пользователем (на этапе подтверждения).'); // Удаляем
         // setRestoreButtonsState('initial'); // Удаляем
         confirmRestoreButtons.style.display = 'none';
         confirmationSection.style.display = 'none';
         restoreDbBtn.style.display = 'block';
-    });
-
-    // Главная кнопка отмены восстановления (для текущей выбранной базы)
-    cancelRestoreProcessBtn.addEventListener('click', () => {
-        const dbName = cancelRestoreProcessBtn.dataset.dbname || newDbNameInput.value.trim();
-        cancelRestore(dbName);
     });
 
     // Обработчик для кнопок отмены внутри прогресс-баров
@@ -484,7 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeRestorePollers[dbName]) {
             return; // Опрос уже запущен
         }
-        addLogEntry(`Запущен опрос прогресса для базы '${dbName}'.`);
+        // addLogEntry(`Запущен опрос прогресса для базы '${dbName}'.`); // Удаляем
         activeRestorePollers[dbName] = setInterval(() => fetchRestoreProgress(dbName), restoreProgressPollingInterval);
     };
 
@@ -499,7 +496,22 @@ document.addEventListener('DOMContentLoaded', () => {
             updateRestoreProgressDisplay(dbName, progress);
 
             if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled' || progress.status === 'not_found') {
-                addLogEntry(`Восстановление базы '${dbName}' завершено со статусом: ${progress.status}.`);
+                let statusMessage = '';
+                switch (progress.status) {
+                    case 'completed':
+                        statusMessage = 'успешно завершено';
+                        break;
+                    case 'failed':
+                        statusMessage = 'завершено с ошибкой';
+                        break;
+                    case 'cancelled':
+                        statusMessage = 'отменено';
+                        break;
+                    case 'not_found':
+                        statusMessage = 'не найдено (возможно, уже завершено или отменено)';
+                        break;
+                }
+                addLogEntry(`Восстановление базы '${dbName}' ${statusMessage}`);
                 if (activeRestorePollers[dbName]) {
                     clearInterval(activeRestorePollers[dbName]);
                     delete activeRestorePollers[dbName];
