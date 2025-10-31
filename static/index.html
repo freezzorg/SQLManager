@@ -2,56 +2,69 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SQLManager</title>
+    <title>Восстановление базы данных</title>
+    <link rel='icon' type='image/png' href='/favicon.png'>
     <link rel="stylesheet" href="style.css">
+    <script type="text/javascript" src="/script.js"></script>
 </head>
 <body>
-    <div class="container">
-        <div class="left-panel">
-            <h2>Базы на сервере</h2>
-            <ul id="database-list">
-                <!-- Список баз данных будет загружен сюда -->
-            </ul>
-            <div class="panel-buttons">
-                <button id="delete-db-btn" class="btn btn-danger">Удалить</button>
-                <button id="refresh-db-btn" class="btn btn-primary">Обновить</button>
-            </div>
-        </div>
-        <div class="right-panel">
-            <h2>Восстановление базы данных</h2>
-            <div class="form-group">
-                <label for="backup-select">Выберите базу данных из бэкапа:</label>
-                <select id="backup-select"></select>
-                <button id="refresh-backups-btn" class="btn btn-primary">Обновить</button>
-            </div>
-            <div class="form-group">
-                <label for="new-db-name">Имя базы данных на сервере:</label>
-                <input type="text" id="new-db-name" placeholder="Введите имя новой базы">
-                <button id="clear-db-name-btn" class="btn btn-secondary">Очистить</button>
-            </div>
-            <div class="form-group">
-                <label for="restore-datetime">Восстановить на дату и время:</label>
-                <input type="text" id="restore-datetime" placeholder="ГГГГ-ММ-ДД ЧЧ:ММ:СС">
-                <button id="set-current-datetime-btn" class="btn btn-secondary">Сейчас</button>
-            </div>
-            <div class="restore-actions">
-                <button id="restore-db-btn" class="btn btn-success full-width">Восстановить базу данных</button>
-                <div id="confirm-restore-buttons" style="display: none;">
-                    <button id="confirm-restore-btn" class="btn btn-success">Восстановить</button>
-                    <button id="cancel-confirm-restore-btn" class="btn btn-secondary">Отменить</button>
+    <div id="container">
+        <div id="main">
+            <div id="left-frame">
+                <h2>Базы на сервере</h2>
+                <ul id="database-list">
+                    <!-- Список баз данных будет загружен сюда -->
+                </ul>
+                <div class="button-group">
+                    <button id="delete-db-btn" class="delete-btn">Удалить</button>
+                    <button id="refresh-db-btn" class="refresh-btn left">Обновить</button>
                 </div>
-                <button id="cancel-restore-process-btn" class="btn btn-danger full-width" style="display: none;">Отменить восстановление базы данных</button>
+            </div>
+            <div id="right-frame">
+                <h2>Восстановление базы данных</h2>
+                <form id="restore-form" method="post">
+                    <div class="form-group">
+                        <label for="backup-select">Выберите базу данных из бэкапа:</label>
+                        <div class="input-group">
+                            <select name="backupBaseName" id="backup-select" required>
+                                <option value="" disabled selected>Выберите бэкап</option>
+                            </select>
+                            <button type="button" id="refresh-backups-btn" class="refresh-btn right">Обновить</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-db-name">Имя базы данных на сервере:</label>
+                        <div class="input-group">
+                            <input type="text" name="newDbName" id="new-db-name" placeholder="Введите имя новой базы" required>
+                            <button type="button" id="clear-db-name-btn" class="clear-btn">Очистить</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="restore-datetime">Восстановить на дату и время:</label>
+                        <div class="input-group">
+                            <input type="datetime-local" name="restoreDateTime" id="restore-datetime" step="1">
+                            <button type="button" id="set-current-datetime-btn" class="now-btn">Сейчас</button>
+                        </div>
+                    </div>
+                    <div id="confirmation-section" class="confirmation" style="display: none;">
+                        <label>Внимание: База данных с таким именем уже существует. Вы уверены, что хотите перезаписать ее?</label>
+                    </div>
+                    <div id="button-container">
+                        <button type="submit" id="restore-db-btn" class="submit-btn">Восстановить базу данных</button>
+                        <div id="confirm-restore-buttons" style="display: none;">
+                            <button type="button" id="confirm-restore-btn" class="confirm-btn">Подтвердить</button>
+                            <button type="button" id="cancel-confirm-restore-btn" class="cancel-btn">Отменить</button>
+                        </div>
+                        <button type="button" id="cancel-restore-process-btn" class="cancel-restore-btn" style="display: none;">Отменить восстановление базы данных</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div id="bottom-frame">
+            <div id="brief-log">
+                <!-- Краткий лог будет загружен сюда -->
             </div>
         </div>
     </div>
-    <div class="log-panel">
-        <h3>Краткий лог действий</h3>
-        <ul id="brief-log">
-            <!-- Краткий лог будет загружен сюда -->
-        </ul>
-    </div>
-
-    <script src="script.js"></script>
 </body>
 </html>
