@@ -31,8 +31,8 @@ type BackupFileSequence struct {
 	DatabaseBackupLSN string    // Для DIFF бэкапов (Target LSN)
 }
 
-// RestoreProgress - Структура для отслеживания прогресса восстановления
-type RestoreProgress struct {
+// restoreProgress - Структура для отслеживания прогресса восстановления
+type restoreProgress struct {
 	TotalFiles    int       `json:"totalFiles"`
 	CompletedFiles int       `json:"completedFiles"`
 	CurrentFile   string    `json:"currentFile"`
@@ -45,8 +45,8 @@ type RestoreProgress struct {
 }
 
 // Глобальная карта для хранения прогресса восстановления по имени новой БД
-var restoreProgresses = make(map[string]*RestoreProgress)
-var restoreProgressesMutex sync.Mutex
+var RestoreProgresses = make(map[string]*restoreProgress)
+var RestoreProgressesMutex sync.Mutex
 
 // --- Утилиты для PIRT ---
 
@@ -389,15 +389,15 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 	// Создаем контекст для отмены операции восстановления
 	ctx, cancel := context.WithCancel(context.Background())
 
-	restoreProgressesMutex.Lock()
-	restoreProgresses[newDBName] = &RestoreProgress{
+	RestoreProgressesMutex.Lock()
+	RestoreProgresses[newDBName] = &restoreProgress{
 		Status:      "pending",
 		StartTime:   time.Now(),
 		TotalFiles:  0, // Будет обновлено после получения filesToRestore
 		CurrentFile: "Инициализация...",
 		CancelFunc:  cancel, // Сохраняем функцию отмены
 	}
-	restoreProgressesMutex.Unlock()
+	RestoreProgressesMutex.Unlock()
 
 	// Используем горутину, чтобы не блокировать обработчик HTTP-запросов
 	go func(ctx context.Context, cancel context.CancelFunc) { // Передаем контекст и функцию отмены
@@ -409,33 +409,33 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 		}
 
 		// Обновляем статус на "in_progress"
-		restoreProgressesMutex.Lock()
-		progress := restoreProgresses[newDBName]
+		RestoreProgressesMutex.Lock()
+		progress := RestoreProgresses[newDBName]
 		if progress != nil {
 			progress.Status = "in_progress"
 		}
-		restoreProgressesMutex.Unlock()
+		RestoreProgressesMutex.Unlock()
 
 		// 1. Получение последовательности бэкапов
 		filesToRestore, err := getRestoreSequence(backupBaseName, restoreTime)
 		if err != nil {
 			LogError(fmt.Sprintf("Ошибка получения последовательности бэкапов для %s: %v", backupBaseName, err))
-			restoreProgressesMutex.Lock()
+			RestoreProgressesMutex.Lock()
 			if progress != nil {
 				progress.Status = "failed"
 				progress.Error = err.Error()
 				progress.EndTime = time.Now()
 			}
-			restoreProgressesMutex.Unlock()
+			RestoreProgressesMutex.Unlock()
 			return
 		}
 
 		// Обновляем общее количество файлов
-		restoreProgressesMutex.Lock()
+		RestoreProgressesMutex.Lock()
 		if progress != nil {
 			progress.TotalFiles = len(filesToRestore)
 		}
-		restoreProgressesMutex.Unlock()
+		RestoreProgressesMutex.Unlock()
 
 		// 2. Определение первого файла и логических имен
 		startFile := filesToRestore[0]
@@ -444,13 +444,13 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 		logicalFiles, err := getBackupLogicalFiles(startFile.Path)
 		if err != nil {
 			LogError(fmt.Sprintf("Ошибка получения логических имен файлов бэкапа для %s: %v", backupBaseName, err))
-			restoreProgressesMutex.Lock()
+			RestoreProgressesMutex.Lock()
 			if progress != nil {
 				progress.Status = "failed"
 				progress.Error = err.Error()
 				progress.EndTime = time.Now()
 			}
-			restoreProgressesMutex.Unlock()
+			RestoreProgressesMutex.Unlock()
 			return
 		}
 		LogDebug(fmt.Sprintf("Успешно получены логические имена файлов из бэкапа: %+v", logicalFiles))
@@ -491,13 +491,13 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 			select {
 			case <-ctx.Done():
 				LogError(fmt.Sprintf("Восстановление базы '%s' отменено пользователем.", newDBName))
-				restoreProgressesMutex.Lock()
+				RestoreProgressesMutex.Lock()
 				if progress != nil {
 					progress.Status = "cancelled"
 					progress.Error = "Отменено пользователем"
 					progress.EndTime = time.Now()
 				}
-				restoreProgressesMutex.Unlock()
+				RestoreProgressesMutex.Unlock()
 				// Горутина восстановления просто завершается, удаление БД будет выполнено в cancelRestoreProcess
 				// Не пытаемся перевести в EMERGENCY или удалять здесь.
 				return
@@ -506,7 +506,7 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 			}
 
 			// Обновляем прогресс перед выполнением каждого RESTORE
-			restoreProgressesMutex.Lock()
+			RestoreProgressesMutex.Lock()
 			if progress != nil {
 				progress.CompletedFiles = i
 				progress.CurrentFile = filepath.Base(file.Path)
@@ -514,7 +514,7 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 					progress.Percentage = (i * 100) / progress.TotalFiles
 				}
 			}
-			restoreProgressesMutex.Unlock()
+			RestoreProgressesMutex.Unlock()
 
 			isFirstFile := i == 0
 			isLastFile := i == len(filesToRestore)-1
@@ -560,26 +560,26 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 			if _, err := dbConn.Exec(restoreQuery); err != nil {
 				LogDebug(fmt.Sprintf("Прерывание RESTORE для %s (файл: %s, позиция: %d): %v", newDBName, file.Path, file.Position, err))
 				// Обновляем статус на "failed", удаление БД будет выполнено в cancelRestoreProcess
-				restoreProgressesMutex.Lock()
+				RestoreProgressesMutex.Lock()
 				if progress != nil {
 					progress.Status = "failed"
 					progress.Error = err.Error()
 					progress.EndTime = time.Now()
 				}
-				restoreProgressesMutex.Unlock()
+				RestoreProgressesMutex.Unlock()
 				return
 			}
 		}
 		
 		LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
-		restoreProgressesMutex.Lock()
+		RestoreProgressesMutex.Lock()
 		if progress != nil {
 			progress.Status = "completed"
 			progress.CompletedFiles = progress.TotalFiles // Все файлы завершены
 			progress.Percentage = 100
 			progress.EndTime = time.Now()
 		}
-		restoreProgressesMutex.Unlock()
+		RestoreProgressesMutex.Unlock()
 
 	}(ctx, cancel) // Передаем контекст и функцию отмены в горутину
 
@@ -610,7 +610,6 @@ func killRestoreSession(dbName string) error {
 		   OR r.status = 'suspended';
 	`
 	
-	LogDebug(fmt.Sprintf("Выполнение запроса для поиска сессий: %s", query))
 	rows, err := dbConn.Query(query)
 	if err != nil {
 		return fmt.Errorf("ошибка при запросе активных сессий восстановления для БД '%s': %w", dbName, err)
@@ -654,9 +653,9 @@ func killRestoreSession(dbName string) error {
 
 // Отмена восстановления
 func cancelRestoreProcess(dbName string) error {
-	restoreProgressesMutex.Lock()
-	progress, exists := restoreProgresses[dbName]
-	restoreProgressesMutex.Unlock()
+	RestoreProgressesMutex.Lock()
+	progress, exists := RestoreProgresses[dbName]
+	RestoreProgressesMutex.Unlock()
 
 	if !exists {
 		return fmt.Errorf("восстановление базы '%s' не найдено", dbName)
@@ -664,7 +663,7 @@ func cancelRestoreProcess(dbName string) error {
 
 	if progress.Status == "completed" || progress.Status == "failed" || progress.Status == "cancelled" {
 		LogInfo(fmt.Sprintf("Восстановление базы '%s' уже в статусе '%s'. Попытка удаления базы.", dbName, progress.Status))
-		delete(restoreProgresses, dbName)
+		delete(RestoreProgresses, dbName)
 		return deleteDatabase(dbName)
 	}
 
@@ -684,15 +683,15 @@ func cancelRestoreProcess(dbName string) error {
 		LogError(fmt.Sprintf("Ошибка при завершении сессий восстановления для базы '%s': %v", dbName, err))
 	}
 	
-	delete(restoreProgresses, dbName)
+	delete(RestoreProgresses, dbName)
 	return deleteDatabase(dbName)
 }
 
-// GetRestoreProgress - Возвращает текущий прогресс восстановления для указанной БД
-func GetRestoreProgress(dbName string) *RestoreProgress {
-	restoreProgressesMutex.Lock()
-	defer restoreProgressesMutex.Unlock()
-	return restoreProgresses[dbName]
+// getRestoreProgress - Возвращает текущий прогресс восстановления для указанной БД
+func getRestoreProgress(dbName string) *restoreProgress {
+	RestoreProgressesMutex.Lock()
+	defer RestoreProgressesMutex.Unlock()
+	return RestoreProgresses[dbName]
 }
 
 // GetDatabases - Получение списка пользовательских баз данных
@@ -736,9 +735,9 @@ func GetDatabases() ([]Database, error) {
 		}
 
 		// Дополнительная проверка: если база находится в процессе восстановления через наше приложение
-		restoreProgressesMutex.Lock()
-		progress, exists := restoreProgresses[db.Name]
-		restoreProgressesMutex.Unlock()
+		RestoreProgressesMutex.Lock()
+		progress, exists := RestoreProgresses[db.Name]
+		RestoreProgressesMutex.Unlock()
 
 		if exists && (progress.Status == "pending" || progress.Status == "in_progress") {
 			db.State = "restoring" // Переопределяем статус, если наше приложение активно восстанавливает

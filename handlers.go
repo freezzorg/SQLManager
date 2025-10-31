@@ -263,12 +263,12 @@ func handleGetRestoreProgress(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    progress := GetRestoreProgress(dbName)
+    progress := getRestoreProgress(dbName)
     if progress == nil {
         // Если прогресс не найден, возможно, восстановление еще не началось или уже завершено/отменено
         // Возвращаем пустой прогресс или статус "not_found"
         w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(&RestoreProgress{Status: "not_found"})
+        json.NewEncoder(w).Encode(&restoreProgress{Status: "not_found"})
         return
     }
 
