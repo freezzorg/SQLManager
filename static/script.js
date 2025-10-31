@@ -88,21 +88,52 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/databases');
             const databases = await response.json();
 
-            databaseList.innerHTML = '';
+            const currentDbElements = new Map();
+            databaseList.querySelectorAll('li.db-item').forEach(li => {
+                currentDbElements.set(li.dataset.dbname, li);
+            });
+
             const restoringDbs = []; // Для отслеживания баз в процессе восстановления
+            const newDbNames = new Set(databases.map(db => db.name));
 
             databases.forEach(db => {
-                const li = document.createElement('li');
+                let li = currentDbElements.get(db.name);
+
+                if (!li) {
+                    // Если элемента нет, создаем новый
+                    li = document.createElement('li');
+                    li.dataset.dbname = db.name;
+                    li.addEventListener('click', () => {
+                        selectedDatabase = db.name;
+                        newDbNameInput.value = db.name;
+
+                        document.querySelectorAll('.db-item').forEach(item => {
+                            item.classList.remove('selected');
+                        });
+                        li.classList.add('selected');
+                    });
+                    databaseList.appendChild(li); // Добавляем новый элемент в список
+                } else {
+                    currentDbElements.delete(db.name); // Удаляем из карты, чтобы отслеживать удаленные
+                }
+
+                // Обновляем классы и содержимое
                 li.className = `db-item db-state-${db.state}`;
-                li.dataset.dbname = db.name; // Добавляем data-атрибут для удобства поиска
-
-                const dbNameSpan = document.createElement('span');
-                dbNameSpan.className = 'db-name';
+                
+                let dbNameSpan = li.querySelector('.db-name');
+                if (!dbNameSpan) {
+                    dbNameSpan = document.createElement('span');
+                    dbNameSpan.className = 'db-name';
+                    li.prepend(dbNameSpan); // Добавляем в начало
+                }
                 dbNameSpan.textContent = db.name;
-                li.appendChild(dbNameSpan);
 
-                const statusIconSpan = document.createElement('span');
-                statusIconSpan.className = 'db-status-icon';
+                let statusIconSpan = li.querySelector('.db-status-icon');
+                if (!statusIconSpan) {
+                    statusIconSpan = document.createElement('span');
+                    statusIconSpan.className = 'db-status-icon';
+                    li.insertBefore(statusIconSpan, dbNameSpan.nextSibling); // Добавляем после имени
+                }
                 statusIconSpan.title = db.state;
                 let iconClass = '';
                 switch (db.state) {
@@ -123,32 +154,43 @@ document.addEventListener('DOMContentLoaded', () => {
                         iconClass = 'fas fa-question-circle unknown';
                 }
                 statusIconSpan.innerHTML = `<i class="${iconClass}"></i>`;
-                li.appendChild(statusIconSpan);
 
-                // Контейнер для прогресс-бара (скрыт по умолчанию)
-                const progressContainer = document.createElement('div');
-                progressContainer.className = 'restore-progress-container';
-                progressContainer.style.display = 'none'; // Скрыт, пока не начнется восстановление
-                progressContainer.innerHTML = `
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: 0%;"></div>
-                    </div>
-                    <span class="progress-text">0%</span>
-                    <button class="cancel-restore-btn-inline" data-dbname="${db.name}">Отменить</button>
-                `;
-                li.appendChild(progressContainer);
+                let progressContainer = li.querySelector('.restore-progress-container');
+                if (db.state === 'restoring') {
+                    if (!progressContainer) {
+                        progressContainer = document.createElement('div');
+                        progressContainer.className = 'restore-progress-container';
+                        progressContainer.innerHTML = `
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 0%;"></div>
+                            </div>
+                            <span class="progress-text">0%</span>
+                            <button class="cancel-restore-btn-inline" data-dbname="${db.name}">Отменить</button>
+                        `;
+                        li.appendChild(progressContainer);
+                        // Добавляем обработчик для новой кнопки отмены
+                        progressContainer.querySelector('.cancel-restore-btn-inline').addEventListener('click', (event) => {
+                            event.stopPropagation(); // Предотвращаем всплытие события на li
+                            cancelRestore(db.name);
+                        });
+                    }
+                    progressContainer.style.display = 'flex'; // Показываем прогресс-бар
+                    startRestoreProgressPolling(db.name); // Убеждаемся, что опрос запущен
+                } else {
+                    if (progressContainer) {
+                        progressContainer.style.display = 'none'; // Скрываем прогресс-бар
+                    }
+                }
+            });
 
-                li.addEventListener('click', () => {
-                    selectedDatabase = db.name;
-                    newDbNameInput.value = db.name;
-
-                    document.querySelectorAll('.db-item').forEach(item => {
-                        item.classList.remove('selected');
-                    });
-                    li.classList.add('selected');
-                });
-
-                databaseList.appendChild(li);
+            // Удаляем элементы, которых больше нет в списке баз данных
+            currentDbElements.forEach(li => {
+                databaseList.removeChild(li);
+                // Останавливаем опрос, если он был активен для удаленной БД
+                if (activeRestorePollers[li.dataset.dbname]) {
+                    clearInterval(activeRestorePollers[li.dataset.dbname]);
+                    delete activeRestorePollers[li.dataset.dbname];
+                }
             });
 
             // Запускаем/останавливаем опрос прогресса для восстанавливаемых баз
@@ -166,22 +208,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            restoringDbs.forEach(dbName => {
-                if (!activeRestorePollers[dbName]) {
-                    startRestoreProgressPolling(dbName);
-                }
-            });
-
             // Обновляем состояние главной кнопки отмены, если есть активные восстановления
             if (restoringDbs.length > 0) {
                 cancelRestoreProcessBtn.style.display = 'block';
-                // Привязываем кнопку к первой восстанавливаемой базе (или можно сделать ее общей)
-                // Для простоты пока привяжем к newDbNameInput, если он совпадает с одной из восстанавливаемых
                 if (restoringDbs.includes(newDbNameInput.value.trim())) {
                     cancelRestoreProcessBtn.dataset.dbname = newDbNameInput.value.trim();
                 } else {
-                    // Если текущий newDbNameInput не восстанавливается, но есть другие,
-                    // можно деактивировать или привязать к первой в списке
                     cancelRestoreProcessBtn.dataset.dbname = restoringDbs[0];
                 }
             } else {
@@ -499,7 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (progress.status === 'in_progress' || progress.status === 'pending') {
             progressContainer.style.display = 'flex'; // Показываем прогресс-бар
             progressBarFill.style.width = `${progress.percentage}%`;
-            progressText.textContent = `${progress.percentage}% (${progress.currentFile})`;
+            progressText.textContent = `${progress.percentage}%`; // Удалено отображение имени файла
             statusIconSpan.innerHTML = `<i class="fas fa-sync-alt fa-spin restoring" title="Восстанавливается"></i>`;
             statusIconSpan.title = "restoring";
         } else {
