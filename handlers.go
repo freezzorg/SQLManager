@@ -89,7 +89,7 @@ func handleGetDatabases(w http.ResponseWriter, r *http.Request) {
         return
     }
     
-    databases, err := getDatabases()
+    databases, err := GetDatabases()
     if err != nil {
         LogError(fmt.Sprintf("Не удалось получить список баз данных: %v", err))
         http.Error(w, "Ошибка сервера при получении списка баз данных", http.StatusInternalServerError)

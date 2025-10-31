@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context" // Добавлен импорт
 	"database/sql"
 	"fmt"
 	"os"
@@ -40,6 +41,7 @@ type RestoreProgress struct {
 	StartTime     time.Time `json:"startTime"`
 	EndTime       time.Time `json:"endTime"`
 	Error         string    `json:"error,omitempty"`
+	CancelFunc    context.CancelFunc `json:"-"` // Функция для отмены контекста горутины
 }
 
 // Глобальная карта для хранения прогресса восстановления по имени новой БД
@@ -384,17 +386,23 @@ func getRestoreSequence(baseName string, restoreTime *time.Time) ([]BackupFileSe
 // Запускает асинхронный процесс восстановления базы данных
 func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) error {
 	// Инициализация прогресса восстановления
+	// Создаем контекст для отмены операции восстановления
+	ctx, cancel := context.WithCancel(context.Background())
+
 	restoreProgressesMutex.Lock()
 	restoreProgresses[newDBName] = &RestoreProgress{
 		Status:      "pending",
 		StartTime:   time.Now(),
 		TotalFiles:  0, // Будет обновлено после получения filesToRestore
 		CurrentFile: "Инициализация...",
+		CancelFunc:  cancel, // Сохраняем функцию отмены
 	}
 	restoreProgressesMutex.Unlock()
 
 	// Используем горутину, чтобы не блокировать обработчик HTTP-запросов
-	go func() {
+	go func(ctx context.Context, cancel context.CancelFunc) { // Передаем контекст и функцию отмены
+		defer cancel() // Гарантируем вызов cancel при завершении горутины
+
 		LogInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
 		if restoreTime != nil {
 			LogDebug(fmt.Sprintf("Желаемое время восстановления (PIRT): %s", restoreTime.Format("2006-01-02 15:04:05")))
@@ -479,6 +487,24 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 		
 		// 4. Выполнение восстановления
 		for i, file := range filesToRestore {
+			// Проверяем контекст на отмену перед каждым шагом восстановления
+			select {
+			case <-ctx.Done():
+				LogError(fmt.Sprintf("Восстановление базы '%s' отменено пользователем.", newDBName))
+				restoreProgressesMutex.Lock()
+				if progress != nil {
+					progress.Status = "cancelled"
+					progress.Error = "Отменено пользователем"
+					progress.EndTime = time.Now()
+				}
+				restoreProgressesMutex.Unlock()
+				// Горутина восстановления просто завершается, удаление БД будет выполнено в cancelRestoreProcess
+				// Не пытаемся перевести в EMERGENCY или удалять здесь.
+				return
+			default:
+				// Продолжаем, если контекст не отменен
+			}
+
 			// Обновляем прогресс перед выполнением каждого RESTORE
 			restoreProgressesMutex.Lock()
 			if progress != nil {
@@ -532,9 +558,8 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 			LogDebug(fmt.Sprintf("Выполнение RESTORE (%d/%d): %s", i+1, len(filesToRestore), restoreQuery))
 			
 			if _, err := dbConn.Exec(restoreQuery); err != nil {
-				LogError(fmt.Sprintf("Ошибка RESTORE для %s (файл: %s, позиция: %d): %v", newDBName, file.Path, file.Position, err))
-				// Удаляем нерабочую БД при ошибке восстановления
-				deleteDatabase(newDBName) 
+				LogDebug(fmt.Sprintf("Прерывание RESTORE для %s (файл: %s, позиция: %d): %v", newDBName, file.Path, file.Position, err))
+				// Обновляем статус на "failed", удаление БД будет выполнено в cancelRestoreProcess
 				restoreProgressesMutex.Lock()
 				if progress != nil {
 					progress.Status = "failed"
@@ -556,26 +581,18 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 		}
 		restoreProgressesMutex.Unlock()
 
-	}()
+	}(ctx, cancel) // Передаем контекст и функцию отмены в горутину
 
 	return nil
 }
 
 // Удаление базы данных
 func deleteDatabase(dbName string) error {
-	// 1. Попытка перевести базу в SINGLE_USER, чтобы сбросить соединения.
-	singleUserQuery := fmt.Sprintf("ALTER DATABASE [%s] SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName)
-	LogDebug(fmt.Sprintf("Попытка перевести БД '%s' в SINGLE_USER...", dbName))
-	if _, err := dbConn.Exec(singleUserQuery); err != nil {
-		// Логируем ошибку, но не возвращаем её, чтобы перейти к DROP DATABASE
-		LogError(fmt.Sprintf("Ошибка перевода БД '%s' в SINGLE_USER. Продолжение попытки DROP: %v", dbName, err))
-	}
-
-	// 2. Удаляем базу данных.
+	// 1. Удаляем базу данных.
+	// Перевод в SINGLE_USER не требуется, так как база не используется во время восстановления.
 	deleteQuery := fmt.Sprintf("DROP DATABASE [%s]", dbName)
 	LogDebug(fmt.Sprintf("Выполнение DROP DATABASE [%s]", dbName))
 	if _, err := dbConn.Exec(deleteQuery); err != nil {
-		// Если DROP DATABASE не сработал, возвращаем ошибку.
 		return fmt.Errorf("ошибка DROP DATABASE для БД %s: %w", dbName, err)
 	}
 	
@@ -583,9 +600,91 @@ func deleteDatabase(dbName string) error {
 	return nil
 }
 
-// Отмена восстановления (УДАЛЯЕТ БД, так как она неработоспособна)
+// killRestoreSession - Находит и завершает активные сессии восстановления для указанной БД
+func killRestoreSession(dbName string) error {
+	query := `
+		SELECT r.session_id, t.text
+		FROM sys.dm_exec_requests r
+		CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+		WHERE r.command LIKE '%RESTORE%'
+		   OR r.status = 'suspended';
+	`
+	
+	LogDebug(fmt.Sprintf("Выполнение запроса для поиска сессий: %s", query))
+	rows, err := dbConn.Query(query)
+	if err != nil {
+		return fmt.Errorf("ошибка при запросе активных сессий восстановления для БД '%s': %w", dbName, err)
+	}
+	defer rows.Close()
+
+	var sessionIDsToKill []int
+	for rows.Next() {
+		var sessionID int
+		var commandText sql.NullString
+		if err := rows.Scan(&sessionID, &commandText); err != nil {
+			LogError(fmt.Sprintf("Ошибка сканирования session_id и текста команды: %v", err))
+			continue
+		}
+
+		// Проверяем, содержит ли текст команды имя целевой базы данных
+		if commandText.Valid && strings.Contains(commandText.String, fmt.Sprintf("DATABASE [%s]", dbName)) {
+			sessionIDsToKill = append(sessionIDsToKill, sessionID)
+		}
+	}
+
+	if len(sessionIDsToKill) == 0 {
+		LogDebug(fmt.Sprintf("Активных сессий восстановления для БД '%s' не найдено.", dbName))
+		return nil
+	}
+
+	LogInfo(fmt.Sprintf("Найдено %d активных сессий восстановления для БД '%s'. Попытка завершения...", len(sessionIDsToKill), dbName))
+	for _, sid := range sessionIDsToKill {
+		killQuery := fmt.Sprintf("KILL %d", sid)
+		LogDebug(fmt.Sprintf("Выполнение: %s", killQuery))
+		if _, err := dbConn.Exec(killQuery); err != nil {
+			LogError(fmt.Sprintf("Ошибка KILL сессии %d для БД '%s': %v", sid, dbName, err))
+			// Продолжаем, чтобы попытаться убить другие сессии
+		} else {
+			LogInfo(fmt.Sprintf("Сессия %d для БД '%s' успешно завершена.", sid, dbName))
+		}
+	}
+
+	return nil
+}
+
+// Отмена восстановления
 func cancelRestoreProcess(dbName string) error {
-	LogInfo(fmt.Sprintf("Получен запрос на отмену восстановления. Удаление нерабочей базы данных '%s'.", dbName))
+	restoreProgressesMutex.Lock()
+	progress, exists := restoreProgresses[dbName]
+	restoreProgressesMutex.Unlock()
+
+	if !exists {
+		return fmt.Errorf("восстановление базы '%s' не найдено", dbName)
+	}
+
+	if progress.Status == "completed" || progress.Status == "failed" || progress.Status == "cancelled" {
+		LogInfo(fmt.Sprintf("Восстановление базы '%s' уже в статусе '%s'. Попытка удаления базы.", dbName, progress.Status))
+		delete(restoreProgresses, dbName)
+		return deleteDatabase(dbName)
+	}
+
+	LogInfo(fmt.Sprintf("Получен запрос на отмену восстановления базы данных '%s'.", dbName))
+
+	if progress.CancelFunc != nil {
+		progress.CancelFunc()
+		LogInfo(fmt.Sprintf("Сигнал отмены отправлен для базы '%s'.", dbName))
+	} else {
+		LogError(fmt.Sprintf("CancelFunc для базы '%s' не установлен. Невозможно отправить сигнал отмены.", dbName))
+		return fmt.Errorf("невозможно отменить восстановление для базы '%s': CancelFunc не установлен", dbName)
+	}
+
+	// Сразу пытаемся убить сессии и удалить базу, без таймаута и ожидания
+	LogInfo(fmt.Sprintf("Попытка завершения активных сессий и удаления базы '%s'.", dbName))
+	if err := killRestoreSession(dbName); err != nil {
+		LogError(fmt.Sprintf("Ошибка при завершении сессий восстановления для базы '%s': %v", dbName, err))
+	}
+	
+	delete(restoreProgresses, dbName)
 	return deleteDatabase(dbName)
 }
 
@@ -596,8 +695,8 @@ func GetRestoreProgress(dbName string) *RestoreProgress {
 	return restoreProgresses[dbName]
 }
 
-// Получение списка пользовательских баз данных
-func getDatabases() ([]Database, error) {
+// GetDatabases - Получение списка пользовательских баз данных
+func GetDatabases() ([]Database, error) {
 	query := `
 		SELECT
 			name,
