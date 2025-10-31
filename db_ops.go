@@ -403,7 +403,7 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 	go func(ctx context.Context, cancel context.CancelFunc) { // Передаем контекст и функцию отмены
 		defer cancel() // Гарантируем вызов cancel при завершении горутины
 
-		LogInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
+		LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
 		if restoreTime != nil {
 			LogDebug(fmt.Sprintf("Желаемое время восстановления (PIRT): %s", restoreTime.Format("2006-01-02 15:04:05")))
 		}
@@ -596,7 +596,7 @@ func deleteDatabase(dbName string) error {
 		return fmt.Errorf("ошибка DROP DATABASE для БД %s: %w", dbName, err)
 	}
 	
-	LogInfo(fmt.Sprintf("База данных '%s' успешно удалена.", dbName))
+	LogWebInfo(fmt.Sprintf("База данных '%s' успешно удалена.", dbName))
 	return nil
 }
 
@@ -680,7 +680,7 @@ func cancelRestoreProcess(dbName string) error {
 	// Сразу пытаемся убить сессии и удалить базу, без таймаута и ожидания
 	LogInfo(fmt.Sprintf("Попытка завершения активных сессий и удаления базы '%s'.", dbName))
 	if err := killRestoreSession(dbName); err != nil {
-		LogError(fmt.Sprintf("Ошибка при завершении сессий восстановления для базы '%s': %v", dbName, err))
+		LogWebError(fmt.Sprintf("Ошибка при завершении сессий восстановления для базы '%s': %v", dbName, err))
 	}
 	
 	delete(RestoreProgresses, dbName)

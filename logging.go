@@ -61,17 +61,29 @@ func LogDebug(message string) {
     }
 }
 
-// Функция логирования INFO
+// Функция логирования INFO (только в файл)
 func LogInfo(message string) {
     if currentLogLevel >= 1 {
         fileLogger.Printf("[INFO] %s", message)
-        recordBriefLog(message) // Запись в краткий лог
     }
 }
 
-// Функция логирования ERROR
+// Функция логирования ERROR (только в файл)
 func LogError(message string) {
     // ERROR логируется всегда
     fileLogger.Printf("[ERROR] %s", message)
-    recordBriefLog("ОШИБКА: " + message) // Запись в краткий лог
+}
+
+// Функция логирования INFO для веб-интерфейса (и в файл)
+func LogWebInfo(message string) {
+    if currentLogLevel >= 1 {
+        fileLogger.Printf("[INFO] %s", message)
+        recordBriefLog(message) // Запись в краткий лог для веб-интерфейса
+    }
+}
+
+// Функция логирования ERROR для веб-интерфейса (и в файл)
+func LogWebError(message string) {
+    fileLogger.Printf("[ERROR] %s", message)
+    recordBriefLog("ОШИБКА: " + message) // Запись в краткий лог для веб-интерфейса
 }

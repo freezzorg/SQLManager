@@ -40,7 +40,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
         }
 
         if !isAllowed {
-            LogError(fmt.Sprintf("Доступ запрещен для клиента: %s", ip))
+            LogWebError(fmt.Sprintf("Доступ запрещен для клиента: %s", ip))
             http.Error(w, "Доступ запрещен. Ваш IP/хост не в белом списке.", http.StatusForbidden)
             return
         }
@@ -91,7 +91,7 @@ func handleGetDatabases(w http.ResponseWriter, r *http.Request) {
     
     databases, err := GetDatabases()
     if err != nil {
-        LogError(fmt.Sprintf("Не удалось получить список баз данных: %v", err))
+        LogWebError(fmt.Sprintf("Не удалось получить список баз данных: %v", err))
         http.Error(w, "Ошибка сервера при получении списка баз данных", http.StatusInternalServerError)
         return
     }
@@ -114,13 +114,13 @@ func handleDeleteDatabase(w http.ResponseWriter, r *http.Request) {
     }
     
     if err := deleteDatabase(dbName); err != nil {
-        LogError(fmt.Sprintf("Не удалось удалить базу данных %s: %v", dbName, err))
+        LogWebError(fmt.Sprintf("Не удалось удалить базу данных %s: %v", dbName, err))
         http.Error(w, fmt.Sprintf("Ошибка удаления базы данных: %v", err), http.StatusInternalServerError)
         return
     }
 
     w.WriteHeader(http.StatusOK)
-    LogInfo(fmt.Sprintf("База данных '%s' успешно удалена.", dbName))
+    LogWebInfo(fmt.Sprintf("База данных '%s' успешно удалена.", dbName))
     json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("База данных '%s' успешно удалена.", dbName)})
 }
 
@@ -148,18 +148,18 @@ func handleGetBackups(w http.ResponseWriter, r *http.Request) {
         output, mountErr := cmd.CombinedOutput()
         if mountErr != nil {
             errMsg := fmt.Sprintf("Ошибка монтирования SMB-шары (%s): %v, Вывод: %s", mountPoint, mountErr, string(output))
-            LogError(errMsg)
+            LogWebError(errMsg)
             // Возвращаем пустой список и ошибку
             http.Error(w, "Ошибка монтирования SMB-шары: " + errMsg, http.StatusInternalServerError)
             return
         }
-        LogInfo(fmt.Sprintf("SMB-шара успешно смонтирована в %s.", mountPoint))
+        LogWebInfo(fmt.Sprintf("SMB-шара успешно смонтирована в %s.", mountPoint))
     }
 
     // Получаем список директорий (базовых имен бэкапов)
     baseNames, err := getBackupBaseNames(mountPoint, appConfig.App.BackupBlacklist)
     if err != nil {
-        LogError(fmt.Sprintf("Не удалось получить список бэкапов: %v", err))
+        LogWebError(fmt.Sprintf("Не удалось получить список бэкапов: %v", err))
         http.Error(w, "Ошибка сервера при получении списка бэкапов", http.StatusInternalServerError)
         return
     }
@@ -194,7 +194,7 @@ func handleStartRestore(w http.ResponseWriter, r *http.Request) {
 		t, err := time.Parse("2006-01-02 15:04:05", req.RestoreDateTime)
 		if err != nil {
 			// Логируем ошибку парсинга времени
-			LogError(fmt.Sprintf("Ошибка парсинга времени восстановления %s: %v", req.RestoreDateTime, err))
+			LogWebError(fmt.Sprintf("Ошибка парсинга времени восстановления %s: %v", req.RestoreDateTime, err))
 			http.Error(w, fmt.Sprintf("Неверный формат даты/времени. Ожидается: YYYY-MM-DD HH:MM:SS. Ошибка: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -203,7 +203,7 @@ func handleStartRestore(w http.ResponseWriter, r *http.Request) {
 
     // Вызываем обновленную функцию
     if err := startRestore(req.BackupBaseName, req.NewDBName, restoreTime); err != nil {
-        LogError(fmt.Sprintf("Не удалось начать восстановление базы данных %s: %v", req.NewDBName, err))
+        LogWebError(fmt.Sprintf("Не удалось начать восстановление базы данных %s: %v", req.NewDBName, err))
         http.Error(w, fmt.Sprintf("Ошибка запуска восстановления: %v", err), http.StatusInternalServerError)
         return
     }
@@ -227,13 +227,13 @@ func handleCancelRestoreProcess(w http.ResponseWriter, r *http.Request) {
     }
     
     if err := cancelRestoreProcess(dbName); err != nil {
-        LogError(fmt.Sprintf("Не удалось отменить восстановление (удалить БД %s): %v", dbName, err))
+        LogWebError(fmt.Sprintf("Не удалось отменить восстановление (удалить БД %s): %v", dbName, err))
         http.Error(w, fmt.Sprintf("Ошибка отмены восстановления: %v", err), http.StatusInternalServerError)
         return
     }
 
     w.WriteHeader(http.StatusOK)
-    LogInfo(fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName))
+    LogWebInfo(fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName))
     json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName)})
 }
 
