@@ -88,6 +88,8 @@ func startWebServer(addr string) {
     http.HandleFunc("/api/log", authMiddleware(handleGetBriefLog))
     // ИСПРАВЛЕНО: Обновленный маршрут для отмены восстановления
     http.HandleFunc("/api/cancel-restore", authMiddleware(handleCancelRestoreProcess)) 
+    // Новый маршрут для получения прогресса восстановления
+    http.HandleFunc("/api/restore-progress", authMiddleware(handleGetRestoreProgress))
 
     LogInfo(fmt.Sprintf("Веб-сервер запущен на %s", addr))
     // Запускаем веб-сервер

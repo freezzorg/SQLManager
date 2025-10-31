@@ -7,9 +7,90 @@ body { font-family: Arial, sans-serif; margin: 20px; padding: 0; background-colo
 #bottom-frame { height: 20%; max-height: 20vh; border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; overflow-y: auto; }
 h2 { margin: 0 0 20px 0; font-weight: bold; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
 ul { list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
-li { padding: 5px 0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+li { 
+    padding: 5px 0; 
+    cursor: pointer; 
+    display: flex; 
+    flex-wrap: wrap; /* Позволяет элементам переноситься на новую строку */
+    align-items: center; 
+    font-size: 14px; 
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+    position: relative; /* Для позиционирования прогресс-бара */
+    padding-right: 10px; /* Отступ справа для иконок/кнопок */
+}
 li:hover { background-color: #f5f5f5; }
 li.selected { background-color: #d1e7ff; }
+
+.db-name {
+    flex-grow: 1; /* Занимает доступное пространство */
+    margin-right: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.db-status-icon {
+    margin-left: 5px;
+    font-size: 1.1em;
+    flex-shrink: 0; /* Не сжимается */
+}
+
+.db-status-icon .online { color: #4CAF50; }
+.db-status-icon .restoring { color: #FF9800; }
+.db-status-icon .offline { color: #f44336; }
+.db-status-icon .error { color: #9E9E9E; }
+.db-status-icon .unknown { color: #2196F3; }
+
+.restore-progress-container {
+    display: flex;
+    align-items: center;
+    width: 100%; /* Занимает всю ширину под именем БД */
+    margin-top: 5px;
+    padding-left: 10px; /* Отступ для выравнивания */
+    box-sizing: border-box;
+}
+
+.progress-bar {
+    width: 100px; /* Фиксированная ширина для прогресс-бара */
+    height: 10px;
+    background-color: #e0e0e0;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-right: 5px;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: #2196F3;
+    width: 0%;
+    transition: width 0.3s ease-in-out;
+}
+
+.progress-text {
+    font-size: 0.8em;
+    color: #555;
+    margin-right: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1; /* Может сжиматься */
+}
+
+.cancel-restore-btn-inline {
+    background-color: #f44336;
+    color: white;
+    padding: 3px 8px;
+    font-size: 0.7em;
+    border-radius: 3px;
+    cursor: pointer;
+    flex-shrink: 0; /* Не сжимается */
+    height: auto; /* Автоматическая высота */
+}
+.cancel-restore-btn-inline:hover {
+    background-color: #da190b;
+}
+
 button { padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; height: 30px; box-sizing: border-box; }
 .refresh-btn { background-color: #2196F3; color: white; }
 .refresh-btn.left { width: 100%; }

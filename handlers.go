@@ -249,3 +249,29 @@ func handleGetBriefLog(w http.ResponseWriter, r *http.Request) {
     defer logMutex.Unlock()
     json.NewEncoder(w).Encode(briefLog)
 }
+
+// API для получения прогресса восстановления конкретной базы данных
+func handleGetRestoreProgress(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+        return
+    }
+
+    dbName := r.URL.Query().Get("name")
+    if dbName == "" {
+        http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
+        return
+    }
+
+    progress := GetRestoreProgress(dbName)
+    if progress == nil {
+        // Если прогресс не найден, возможно, восстановление еще не началось или уже завершено/отменено
+        // Возвращаем пустой прогресс или статус "not_found"
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(&RestoreProgress{Status: "not_found"})
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(progress)
+}

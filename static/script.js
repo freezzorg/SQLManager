@@ -20,7 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmationSection = document.getElementById('confirmation-section'); // Добавляем ссылку на секцию подтверждения
 
     let selectedDatabase = null;
-    let restoreInProgress = false;
+    // let restoreInProgress = false; // Больше не нужна, статус будет в restoreProgresses
+
+    const restoreProgressPollingInterval = 3000; // Интервал опроса прогресса в мс
+    const activeRestorePollers = {}; // Хранит setInterval ID для каждой восстанавливаемой БД
 
     // --- Утилиты ---
 
@@ -53,29 +56,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const setRestoreButtonsState = (state) => {
-        restoreDbBtn.style.display = 'none';
-        confirmRestoreButtons.style.display = 'none';
-        cancelRestoreProcessBtn.style.display = 'none';
-        confirmationSection.style.display = 'none'; // Скрываем секцию подтверждения по умолчанию
-
-        switch (state) {
-            case 'initial':
-                restoreDbBtn.style.display = 'block';
-                restoreInProgress = false;
-                break;
-            case 'confirm':
-                confirmRestoreButtons.style.display = 'flex';
-                confirmationSection.style.display = 'block'; // Показываем секцию подтверждения
-                restoreInProgress = false;
-                break;
-            case 'in_progress':
-                cancelRestoreProcessBtn.style.display = 'block';
-                restoreInProgress = true;
-                break;
-        }
-        fetchDatabases();
-    };
+    // setRestoreButtonsState больше не нужна в таком виде, логика кнопок будет управляться через состояние БД
+    // и наличие активных процессов восстановления.
+    // Кнопка отмены восстановления будет привязана к конкретной БД.
+    // setRestoreButtonsState будет удалена.
 
     function formatDateToInput(date) {
         const y = date.getFullYear();
@@ -105,10 +89,54 @@ document.addEventListener('DOMContentLoaded', () => {
             const databases = await response.json();
 
             databaseList.innerHTML = '';
+            const restoringDbs = []; // Для отслеживания баз в процессе восстановления
+
             databases.forEach(db => {
                 const li = document.createElement('li');
                 li.className = `db-item db-state-${db.state}`;
-                li.textContent = `${db.name} (${db.state})`;
+                li.dataset.dbname = db.name; // Добавляем data-атрибут для удобства поиска
+
+                const dbNameSpan = document.createElement('span');
+                dbNameSpan.className = 'db-name';
+                dbNameSpan.textContent = db.name;
+                li.appendChild(dbNameSpan);
+
+                const statusIconSpan = document.createElement('span');
+                statusIconSpan.className = 'db-status-icon';
+                statusIconSpan.title = db.state;
+                let iconClass = '';
+                switch (db.state) {
+                    case 'online':
+                        iconClass = 'fas fa-check-circle online';
+                        break;
+                    case 'restoring':
+                        iconClass = 'fas fa-sync-alt fa-spin restoring'; // Вращающаяся иконка для восстановления
+                        restoringDbs.push(db.name); // Добавляем в список восстанавливаемых
+                        break;
+                    case 'offline':
+                        iconClass = 'fas fa-power-off offline';
+                        break;
+                    case 'error':
+                        iconClass = 'fas fa-exclamation-triangle error';
+                        break;
+                    default:
+                        iconClass = 'fas fa-question-circle unknown';
+                }
+                statusIconSpan.innerHTML = `<i class="${iconClass}"></i>`;
+                li.appendChild(statusIconSpan);
+
+                // Контейнер для прогресс-бара (скрыт по умолчанию)
+                const progressContainer = document.createElement('div');
+                progressContainer.className = 'restore-progress-container';
+                progressContainer.style.display = 'none'; // Скрыт, пока не начнется восстановление
+                progressContainer.innerHTML = `
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 0%;"></div>
+                    </div>
+                    <span class="progress-text">0%</span>
+                    <button class="cancel-restore-btn-inline" data-dbname="${db.name}">Отменить</button>
+                `;
+                li.appendChild(progressContainer);
 
                 li.addEventListener('click', () => {
                     selectedDatabase = db.name;
@@ -123,11 +151,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 databaseList.appendChild(li);
             });
 
-            if (databases.some(db => db.state === 'restoring')) {
-                setRestoreButtonsState('in_progress');
-            } else if (restoreInProgress) {
-                setRestoreButtonsState('initial');
+            // Запускаем/останавливаем опрос прогресса для восстанавливаемых баз
+            Object.keys(activeRestorePollers).forEach(dbName => {
+                if (!restoringDbs.includes(dbName)) {
+                    // Если база больше не восстанавливается, останавливаем опрос
+                    clearInterval(activeRestorePollers[dbName]);
+                    delete activeRestorePollers[dbName];
+                    // Скрываем прогресс-бар, если он был виден
+                    const li = databaseList.querySelector(`li[data-dbname="${dbName}"]`);
+                    if (li) {
+                        const progressContainer = li.querySelector('.restore-progress-container');
+                        if (progressContainer) progressContainer.style.display = 'none';
+                    }
+                }
+            });
+
+            restoringDbs.forEach(dbName => {
+                if (!activeRestorePollers[dbName]) {
+                    startRestoreProgressPolling(dbName);
+                }
+            });
+
+            // Обновляем состояние главной кнопки отмены, если есть активные восстановления
+            if (restoringDbs.length > 0) {
+                cancelRestoreProcessBtn.style.display = 'block';
+                // Привязываем кнопку к первой восстанавливаемой базе (или можно сделать ее общей)
+                // Для простоты пока привяжем к newDbNameInput, если он совпадает с одной из восстанавливаемых
+                if (restoringDbs.includes(newDbNameInput.value.trim())) {
+                    cancelRestoreProcessBtn.dataset.dbname = newDbNameInput.value.trim();
+                } else {
+                    // Если текущий newDbNameInput не восстанавливается, но есть другие,
+                    // можно деактивировать или привязать к первой в списке
+                    cancelRestoreProcessBtn.dataset.dbname = restoringDbs[0];
+                }
+            } else {
+                cancelRestoreProcessBtn.style.display = 'none';
             }
+
 
         } catch (error) {
             console.error('Ошибка получения списка баз данных:', error);
@@ -192,10 +252,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let restoreDateTime = restoreDatetimeInput.value.trim();
         let formattedDateTime = "";
 
-        if (restoreInProgress) {
-            addLogEntry("Предупреждение: Процесс восстановления уже запущен.");
-            return;
-        }
+        // if (restoreInProgress) { // Удаляем
+        //     addLogEntry("Предупреждение: Процесс восстановления уже запущен.");
+        //     return;
+        // }
 
         if (!backupBaseName || !newDbName) {
             alert('Пожалуйста, выберите директорию бэкапа и введите имя восстанавливаемой базы данных.');
@@ -220,17 +280,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         addLogEntry(`Запуск восстановления базы данных '${newDbName}' из бэкапа '${backupBaseName}'...`);
-        setRestoreButtonsState('in_progress');
+        // setRestoreButtonsState('in_progress'); // Удаляем, так как состояние будет управляться через fetchDatabases
 
         const requestBody = {
             backupBaseName: backupBaseName,
             newDbName: newDbName,
             restoreDateTime: formattedDateTime,
-            confirmOverwrite: confirmOverwrite // Добавляем флаг подтверждения
+            // confirmOverwrite: confirmOverwrite // Этот флаг не используется в бэкенде, удаляем
         };
 
         try {
-            restoreInProgress = true;
+            // restoreInProgress = true; // Удаляем
             const response = await fetch('/api/restore', {
                 method: 'POST',
                 headers: {
@@ -241,24 +301,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (response.ok) {
                 addLogEntry(`УСПЕХ: Запрос на восстановление базы '${newDbName}' отправлен. Отслеживайте статус.`);
+                // Сразу запускаем опрос прогресса для этой базы
+                startRestoreProgressPolling(newDbName);
+                fetchDatabases(); // Обновляем список баз, чтобы увидеть статус "restoring"
             } else {
                 const errorText = await response.text();
                 addLogEntry(`ОШИБКА: Не удалось запустить восстановление. Сервер вернул: ${response.status} - ${errorText}`);
                 console.error('Ошибка восстановления:', errorText);
-                setRestoreButtonsState('initial');
+                // setRestoreButtonsState('initial'); // Удаляем
+                fetchDatabases(); // Обновляем список баз
             }
         } catch (error) {
             addLogEntry(`КРИТИЧЕСКАЯ ОШИБКА: Проблема с сетевым запросом: ${error.message}`);
             console.error('Сетевая ошибка:', error);
-            setRestoreButtonsState('initial');
+            // setRestoreButtonsState('initial'); // Удаляем
+            fetchDatabases(); // Обновляем список баз
         }
     }
 
-    const cancelRestore = async () => {
-        const dbName = newDbNameInput.value.trim();
+    const cancelRestore = async (dbName) => { // Принимаем dbName как аргумент
         if (!dbName) {
             alert('Невозможно отменить: имя восстанавливаемой базы не определено.');
-            setRestoreButtonsState('initial');
+            fetchDatabases(); // Обновляем состояние кнопок
             return;
         }
 
@@ -281,12 +345,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const result = await response.json();
             addLogEntry(`УСПЕХ: ${result.message}`);
+            // Останавливаем опрос прогресса для этой базы
+            if (activeRestorePollers[dbName]) {
+                clearInterval(activeRestorePollers[dbName]);
+                delete activeRestorePollers[dbName];
+            }
 
         } catch (error) {
             console.error('Ошибка отмены восстановления:', error);
             addLogEntry(`ОШИБКА: Не удалось отменить восстановление: ${error.message}`);
         } finally {
-            setRestoreButtonsState('initial');
+            fetchDatabases(); // Обновляем список баз, чтобы отразить изменения
         }
     };
 
@@ -328,30 +397,145 @@ document.addEventListener('DOMContentLoaded', () => {
             if (dbExists) {
                 // Если существует, переключаемся в режим подтверждения
                 addLogEntry(`База данных '${newDbName}' существует. Ожидание подтверждения перезаписи.`);
-                setRestoreButtonsState('confirm');
+                // setRestoreButtonsState('confirm'); // Удаляем, управляем видимостью напрямую
+                confirmRestoreButtons.style.display = 'flex';
+                confirmationSection.style.display = 'block';
+                restoreDbBtn.style.display = 'none';
             } else {
                 // Если не существует, запускаем восстановление сразу
                 startRestoreProcess();
+                confirmRestoreButtons.style.display = 'none';
+                confirmationSection.style.display = 'none';
+                restoreDbBtn.style.display = 'block';
             }
         } catch (error) {
             console.error('Ошибка при проверке существования БД перед восстановлением:', error);
             addLogEntry(`ОШИБКА: Не удалось проверить существование БД: ${error.message}`);
-            setRestoreButtonsState('initial');
+            // setRestoreButtonsState('initial'); // Удаляем
+            confirmRestoreButtons.style.display = 'none';
+            confirmationSection.style.display = 'none';
+            restoreDbBtn.style.display = 'block';
         }
     });
 
-    confirmRestoreBtn.addEventListener('click', () => startRestoreProcess(true)); // Передаем true для подтверждения
+    confirmRestoreBtn.addEventListener('click', () => {
+        startRestoreProcess(); // Запускаем без флага confirmOverwrite, так как бэкенд его не использует
+        confirmRestoreButtons.style.display = 'none';
+        confirmationSection.style.display = 'none';
+        restoreDbBtn.style.display = 'block';
+    });
     cancelConfirmRestoreBtn.addEventListener('click', () => {
         addLogEntry('Восстановление отменено пользователем (на этапе подтверждения).');
-        setRestoreButtonsState('initial');
+        // setRestoreButtonsState('initial'); // Удаляем
+        confirmRestoreButtons.style.display = 'none';
+        confirmationSection.style.display = 'none';
+        restoreDbBtn.style.display = 'block';
     });
 
-    cancelRestoreProcessBtn.addEventListener('click', cancelRestore);
+    // Главная кнопка отмены восстановления (для текущей выбранной базы)
+    cancelRestoreProcessBtn.addEventListener('click', () => {
+        const dbName = cancelRestoreProcessBtn.dataset.dbname || newDbNameInput.value.trim();
+        cancelRestore(dbName);
+    });
+
+    // Обработчик для кнопок отмены внутри прогресс-баров
+    databaseList.addEventListener('click', (event) => {
+        if (event.target.classList.contains('cancel-restore-btn-inline')) {
+            const dbName = event.target.dataset.dbname;
+            cancelRestore(dbName);
+        }
+    });
+
+    // --- Новые функции для прогресса восстановления ---
+
+    const startRestoreProgressPolling = (dbName) => {
+        if (activeRestorePollers[dbName]) {
+            return; // Опрос уже запущен
+        }
+        addLogEntry(`Запущен опрос прогресса для базы '${dbName}'.`);
+        activeRestorePollers[dbName] = setInterval(() => fetchRestoreProgress(dbName), restoreProgressPollingInterval);
+    };
+
+    const fetchRestoreProgress = async (dbName) => {
+        try {
+            const response = await fetch(`/api/restore-progress?name=${encodeURIComponent(dbName)}`);
+            if (!response.ok) {
+                throw new Error(`Ошибка получения прогресса для ${dbName}`);
+            }
+            const progress = await response.json();
+
+            updateRestoreProgressDisplay(dbName, progress);
+
+            if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled' || progress.status === 'not_found') {
+                addLogEntry(`Восстановление базы '${dbName}' завершено со статусом: ${progress.status}.`);
+                if (activeRestorePollers[dbName]) {
+                    clearInterval(activeRestorePollers[dbName]);
+                    delete activeRestorePollers[dbName];
+                }
+                fetchDatabases(); // Обновляем список баз, чтобы убрать прогресс-бар и обновить статус
+            }
+
+        } catch (error) {
+            console.error(`Ошибка получения прогресса для ${dbName}:`, error);
+            addLogEntry(`ОШИБКА: Не удалось получить прогресс для базы '${dbName}': ${error.message}`);
+            // Если ошибка, останавливаем опрос, чтобы не спамить запросами
+            if (activeRestorePollers[dbName]) {
+                clearInterval(activeRestorePollers[dbName]);
+                delete activeRestorePollers[dbName];
+            }
+            fetchDatabases(); // Обновляем список баз
+        }
+    };
+
+    const updateRestoreProgressDisplay = (dbName, progress) => {
+        const li = databaseList.querySelector(`li[data-dbname="${dbName}"]`);
+        if (!li) return;
+
+        const statusIconSpan = li.querySelector('.db-status-icon');
+        const progressContainer = li.querySelector('.restore-progress-container');
+        const progressBarFill = li.querySelector('.progress-fill');
+        const progressText = li.querySelector('.progress-text');
+
+        if (progress.status === 'in_progress' || progress.status === 'pending') {
+            progressContainer.style.display = 'flex'; // Показываем прогресс-бар
+            progressBarFill.style.width = `${progress.percentage}%`;
+            progressText.textContent = `${progress.percentage}% (${progress.currentFile})`;
+            statusIconSpan.innerHTML = `<i class="fas fa-sync-alt fa-spin restoring" title="Восстанавливается"></i>`;
+            statusIconSpan.title = "restoring";
+        } else {
+            progressContainer.style.display = 'none'; // Скрываем прогресс-бар
+            let iconClass = '';
+            let title = '';
+            switch (progress.status) {
+                case 'completed':
+                    iconClass = 'fas fa-check-circle online';
+                    title = 'Online';
+                    break;
+                case 'failed':
+                    iconClass = 'fas fa-exclamation-triangle error';
+                    title = 'Ошибка восстановления';
+                    break;
+                case 'cancelled':
+                    iconClass = 'fas fa-times-circle offline'; // Или другой значок для отмены
+                    title = 'Восстановление отменено';
+                    break;
+                case 'not_found': // Если прогресс не найден, значит, база не восстанавливается
+                    // Оставляем текущий статус, который пришел из fetchDatabases
+                    return; 
+                default:
+                    iconClass = 'fas fa-question-circle unknown';
+                    title = 'Неизвестный статус';
+            }
+            statusIconSpan.innerHTML = `<i class="${iconClass}"></i>`;
+            statusIconSpan.title = title;
+        }
+    };
+
 
     // --- Инициализация ---
     fetchDatabases();
     fetchBackups();
     fetchBriefLog();
-    setInterval(fetchDatabases, 10000);
-    setInterval(fetchBriefLog, 5000);
+    setInterval(fetchDatabases, 10000); // Обновляем список баз каждые 10 секунд
+    setInterval(fetchBriefLog, 5000); // Обновляем лог каждые 5 секунд
 });
