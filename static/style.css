@@ -52,12 +52,12 @@ li.selected { background-color: #d1e7ff; }
 }
 
 .progress-bar {
-    width: 100px; /* Фиксированная ширина для прогресс-бара */
+    width: calc(100% - 100px); /* Занимает всю доступную ширину, оставляя место для кнопки */
     height: 10px;
     background-color: #e0e0e0;
     border-radius: 5px;
     overflow: hidden;
-    margin-right: 5px;
+    margin-right: 10px; /* Отступ от текста */
 }
 
 .progress-fill {
