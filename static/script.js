@@ -120,12 +120,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     li.dataset.dbname = db.name;
                     li.addEventListener('click', () => {
                         selectedDatabase = db.name;
-                        newDbNameInput.value = db.name;
-
                         document.querySelectorAll('.db-item').forEach(item => {
                             item.classList.remove('selected');
                         });
                         li.classList.add('selected');
+                    });
+                    li.addEventListener('dblclick', () => { // Изменено на dblclick
+                        newDbNameInput.value = db.name;
                     });
                     databaseList.appendChild(li); // Добавляем новый элемент в список
                 } else {
