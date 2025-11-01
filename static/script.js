@@ -641,7 +641,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             updateBackupProgressDisplay(dbName, progress);
 
-            if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled' || progress.status === 'not_found') {
+            if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'not_found') {
                 let statusMessage = '';
                 switch (progress.status) {
                     case 'completed':
@@ -650,11 +650,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     case 'failed':
                         statusMessage = 'завершено с ошибкой';
                         break;
-                    case 'cancelled':
-                        statusMessage = 'отменено';
-                        break;
                     case 'not_found':
-                        statusMessage = 'не найдено (возможно, уже завершено или отменено)';
+                        statusMessage = 'не найдено (возможно, уже завершено)';
                         break;
                 }
                 addLogEntry(`Создание бэкапа базы '${dbName}' ${statusMessage}`);

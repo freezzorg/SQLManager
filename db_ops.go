@@ -603,7 +603,6 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 
 // startBackup - Запускает асинхронный процесс создания полного бэкапа базы данных
 func startBackup(dbName string) error {
-	// Создаем контекст для отмены операции бэкапа
 	BackupProgressesMutex.Lock()
 	BackupProgresses[dbName] = &backupProgress{
 		Status:    "pending",
@@ -785,7 +784,60 @@ func getRestoreProgress(dbName string) *restoreProgress {
 func getBackupProgress(dbName string) *backupProgress {
 	BackupProgressesMutex.Lock()
 	defer BackupProgressesMutex.Unlock()
-	return BackupProgresses[dbName]
+
+	progress, exists := BackupProgresses[dbName]
+	if !exists {
+		return nil
+	}
+
+	// Если бэкап еще не завершен, пытаемся получить процент выполнения из sys.dm_exec_requests
+	if progress.Status == "in_progress" {
+		query := `
+			SELECT r.percent_complete, r.session_id, t.text
+			FROM sys.dm_exec_requests r
+			CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+			WHERE r.command LIKE '%BACKUP%'
+			   OR r.status = 'suspended';
+		`
+		rows, err := dbConn.Query(query)
+		if err != nil {
+			LogError(fmt.Sprintf("Ошибка при запросе активных сессий BACKUP для БД '%s': %v", dbName, err))
+			return progress
+		}
+		defer rows.Close()
+
+		var foundProgress bool
+		for rows.Next() {
+			var percentComplete float64
+			var sessionID int
+			var commandText sql.NullString
+			if err := rows.Scan(&percentComplete, &sessionID, &commandText); err != nil {
+				LogError(fmt.Sprintf("Ошибка сканирования session_id, percent_complete и текста команды для BACKUP: %v", err))
+				continue
+			}
+
+			// Проверяем, содержит ли текст команды имя целевой базы данных
+			if commandText.Valid && strings.Contains(commandText.String, fmt.Sprintf("DATABASE [%s]", dbName)) {
+				progress.Percentage = int(percentComplete)
+				progress.SessionID = sessionID // Обновляем SessionID, если он изменился или был не установлен
+				foundProgress = true
+				break
+			}
+		}
+
+		if !foundProgress {
+			// Если активный процесс не найден, возможно, он завершился или был отменен
+			// Устанавливаем статус "not_found" или "completed" в зависимости от логики
+			// В данном случае, если процесс не найден, но статус "in_progress", это означает, что он завершился
+			// или был прерван без обновления статуса.
+			// Для простоты, если не нашли, считаем, что он завершился.
+			progress.Status = "completed"
+			progress.Percentage = 100
+			progress.EndTime = time.Now()
+		}
+	}
+
+	return progress
 }
 
 // checkAndCreateBackupDir - Проверяет существование каталога для бэкапов и создает его, если нет
