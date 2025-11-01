@@ -52,12 +52,12 @@ li.selected { background-color: #d1e7ff; }
 }
 
 .progress-bar {
-    width: calc(100% - 100px); /* Занимает всю доступную ширину, оставляя место для кнопки */
+    width: calc(100% - 90px); /* Увеличиваем ширину прогресс-бара */
     height: 10px;
     background-color: #e0e0e0;
     border-radius: 5px;
     overflow: hidden;
-    margin-right: 10px; /* Отступ от текста */
+    margin-right: 5px; /* Уменьшаем отступ от текста */
 }
 
 .progress-fill {
@@ -70,11 +70,12 @@ li.selected { background-color: #d1e7ff; }
 .progress-text {
     font-size: 0.8em;
     color: #555;
-    margin-right: 10px;
+    margin-right: 5px; /* Уменьшаем отступ */
+    min-width: 40px; /* Минимальная ширина для отображения "100%" */
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex-shrink: 1; /* Может сжиматься */
+    overflow: visible; /* Разрешаем выход за пределы, если нужно */
+    text-overflow: clip; /* Отключаем многоточие */
+    flex-shrink: 0; /* Не сжимается */
 }
 
 .cancel-restore-btn-inline {
