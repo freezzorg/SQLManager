@@ -92,8 +92,6 @@ func startWebServer(addr string) {
     http.HandleFunc("/api/restore-progress", authMiddleware(handleGetRestoreProgress))
     // Новый маршрут для запуска создания бэкапа
     http.HandleFunc("/api/backup", authMiddleware(handleStartBackup))
-    // Новый маршрут для отмены создания бэкапа
-    http.HandleFunc("/api/cancel-backup", authMiddleware(handleCancelBackupProcess))
     // Новый маршрут для получения прогресса создания бэкапа
     http.HandleFunc("/api/backup-progress", authMiddleware(handleGetBackupProgress))
 

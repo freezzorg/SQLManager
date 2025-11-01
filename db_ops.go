@@ -53,7 +53,6 @@ type backupProgress struct {
 	Error         string    `json:"error,omitempty"`
 	BackupFilePath string   `json:"backupFilePath,omitempty"` // Путь к создаваемому файлу бэкапа
 	SessionID     int       `json:"sessionID,omitempty"`      // Session ID процесса BACKUP
-	CancelFunc    context.CancelFunc `json:"-"` // Функция для отмены контекста горутины
 }
 
 // Глобальная карта для хранения прогресса восстановления по имени новой БД
@@ -605,19 +604,14 @@ func startRestore(backupBaseName, newDBName string, restoreTime *time.Time) erro
 // startBackup - Запускает асинхронный процесс создания полного бэкапа базы данных
 func startBackup(dbName string) error {
 	// Создаем контекст для отмены операции бэкапа
-	ctx, cancel := context.WithCancel(context.Background())
-
 	BackupProgressesMutex.Lock()
 	BackupProgresses[dbName] = &backupProgress{
 		Status:    "pending",
 		StartTime: time.Now(),
-		CancelFunc: cancel, // Сохраняем функцию отмены
 	}
 	BackupProgressesMutex.Unlock()
 
-	go func(ctx context.Context, cancel context.CancelFunc) {
-		defer cancel()
-
+	go func() {
 		LogWebInfo(fmt.Sprintf("Начато асинхронное создание полного бэкапа базы '%s'.", dbName))
 
 		// 1. Проверяем и создаем каталог для бэкапов
@@ -650,42 +644,8 @@ func startBackup(dbName string) error {
 		backupQuery := fmt.Sprintf("BACKUP DATABASE [%s] TO DISK = N'%s' WITH INIT, STATS = 10", dbName, backupFilePath)
 		LogDebug(fmt.Sprintf("Выполнение BACKUP DATABASE: %s", backupQuery))
 
-		// Используем QueryRow для получения session_id, если это возможно, или просто Exec
-		// Для получения прогресса нам нужен session_id
-		// Запускаем команду в фоновом режиме и сразу пытаемся получить session_id
-		go func() {
-			// Даем SQL Server немного времени, чтобы начать процесс BACKUP
-			time.Sleep(1 * time.Second) 
-			sessionID, err := getBackupSessionID(dbName)
-			if err != nil {
-				LogError(fmt.Sprintf("Не удалось получить session_id для BACKUP базы '%s': %v", dbName, err))
-				// Продолжаем без session_id, прогресс не будет отображаться
-			} else {
-				BackupProgressesMutex.Lock()
-				if progress := BackupProgresses[dbName]; progress != nil {
-					progress.SessionID = sessionID
-				}
-				BackupProgressesMutex.Unlock()
-				LogDebug(fmt.Sprintf("Получен session_id %d для BACKUP базы '%s'.", sessionID, dbName))
-			}
-		}()
-
-		_, err = dbConn.ExecContext(ctx, backupQuery) // Используем ExecContext для отмены
+		_, err = dbConn.Exec(backupQuery)
 		
-		// Проверяем, была ли отмена через контекст
-		if ctx.Err() != nil {
-			LogError(fmt.Sprintf("Создание бэкапа базы '%s' отменено пользователем (контекст).", dbName))
-			BackupProgressesMutex.Lock()
-			if progress := BackupProgresses[dbName]; progress != nil {
-				progress.Status = "cancelled"
-				progress.Error = "Отменено пользователем"
-				progress.EndTime = time.Now()
-			}
-			BackupProgressesMutex.Unlock()
-			// Удаление файла бэкапа будет выполнено в cancelBackupProcess
-			return
-		}
-
 		if err != nil {
 			LogError(fmt.Sprintf("Ошибка при создании бэкапа базы '%s': %v", dbName, err))
 			BackupProgressesMutex.Lock()
@@ -695,11 +655,10 @@ func startBackup(dbName string) error {
 				progress.EndTime = time.Now()
 			}
 			BackupProgressesMutex.Unlock()
-			// Удаление файла бэкапа будет выполнено в cancelBackupProcess
 			return
 		}
 
-		LogInfo(fmt.Sprintf("Создание бэкапа базы данных '%s' успешно завершено в файл '%s'.", dbName, backupFilePath))
+		LogWebInfo(fmt.Sprintf("Создание бэкапа базы данных '%s' успешно завершено в файл '%s'.", dbName, backupFilePath)) // Изменено на LogWebInfo
 		BackupProgressesMutex.Lock()
 		if progress := BackupProgresses[dbName]; progress != nil {
 			progress.Percentage = 100
@@ -708,7 +667,7 @@ func startBackup(dbName string) error {
 		}
 		BackupProgressesMutex.Unlock()
 
-	}(ctx, cancel)
+	}()
 
 	return nil
 }
@@ -814,71 +773,6 @@ func cancelRestoreProcess(dbName string) error {
 	return deleteDatabase(dbName)
 }
 
-// cancelBackupProcess - Отменяет активный процесс создания бэкапа и удаляет файл бэкапа
-func cancelBackupProcess(dbName string) error {
-	BackupProgressesMutex.Lock()
-	progress, exists := BackupProgresses[dbName]
-	BackupProgressesMutex.Unlock()
-
-	if !exists {
-		return fmt.Errorf("процесс создания бэкапа для базы '%s' не найден", dbName)
-	}
-
-	if progress.Status == "completed" || progress.Status == "failed" || progress.Status == "cancelled" {
-		LogInfo(fmt.Sprintf("Создание бэкапа базы '%s' уже в статусе '%s'. Попытка удаления файла бэкапа.", dbName, progress.Status))
-		delete(BackupProgresses, dbName)
-		if progress.BackupFilePath != "" {
-			return os.Remove(progress.BackupFilePath)
-		}
-		return nil
-	}
-
-	LogInfo(fmt.Sprintf("Получен запрос на отмену создания бэкапа базы данных '%s'.", dbName))
-
-	// Отправляем сигнал отмены через контекст
-	if progress.CancelFunc != nil {
-		progress.CancelFunc()
-		LogInfo(fmt.Sprintf("Сигнал отмены отправлен для бэкапа базы '%s'.", dbName))
-	} else {
-		LogError(fmt.Sprintf("CancelFunc для бэкапа базы '%s' не установлен. Невозможно отправить сигнал отмены.", dbName))
-		return fmt.Errorf("невозможно отменить бэкап для базы '%s': CancelFunc не установлен", dbName)
-	}
-
-	// Если есть session_id, пытаемся убить процесс
-	if progress.SessionID != 0 {
-		killQuery := fmt.Sprintf("KILL %d", progress.SessionID)
-		LogDebug(fmt.Sprintf("Попытка KILL сессии %d для бэкапа базы '%s'.", progress.SessionID, dbName))
-		if _, err := dbConn.Exec(killQuery); err != nil {
-			LogError(fmt.Sprintf("Ошибка KILL сессии %d для бэкапа базы '%s': %v", progress.SessionID, dbName, err))
-			// Продолжаем, даже если KILL не удался
-		} else {
-			LogInfo(fmt.Sprintf("Сессия %d для бэкапа базы '%s' успешно завершена.", progress.SessionID, dbName))
-		}
-	} else {
-		LogDebug(fmt.Sprintf("Session ID для бэкапа базы '%s' не найден, KILL не требуется.", dbName))
-	}
-
-	// Удаляем файл бэкапа, если он был создан
-	if progress.BackupFilePath != "" {
-		if err := os.Remove(progress.BackupFilePath); err != nil {
-			LogError(fmt.Sprintf("Ошибка удаления файла бэкапа '%s' для базы '%s': %v", progress.BackupFilePath, dbName, err))
-			return fmt.Errorf("ошибка удаления файла бэкапа: %w", err)
-		}
-		LogInfo(fmt.Sprintf("Файл бэкапа '%s' для базы '%s' успешно удален.", progress.BackupFilePath, dbName))
-	}
-
-	// Обновляем статус в глобальной карте
-	BackupProgressesMutex.Lock()
-	if progress := BackupProgresses[dbName]; progress != nil {
-		progress.Status = "cancelled"
-		progress.EndTime = time.Now()
-		progress.Error = "Отменено пользователем"
-	}
-	BackupProgressesMutex.Unlock()
-	
-	delete(BackupProgresses, dbName) // Удаляем запись из карты
-	return nil
-}
 
 // getRestoreProgress - Возвращает текущий прогресс восстановления для указанной БД
 func getRestoreProgress(dbName string) *restoreProgress {
@@ -912,28 +806,6 @@ func checkAndCreateBackupDir(dbName string) (string, error) {
     return backupDir, nil
 }
 
-// getBackupSessionID - Получает session_id активного процесса BACKUP для указанной БД
-func getBackupSessionID(dbName string) (int, error) {
-    query := `
-        SELECT r.session_id
-        FROM sys.dm_exec_requests r
-        CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
-        WHERE r.command LIKE '%BACKUP%'
-          AND t.text LIKE @p1;
-    `
-    // Параметр для LIKE, чтобы избежать SQL-инъекций и корректно искать имя базы
-    param := fmt.Sprintf("%%BACKUP DATABASE [%s]%%", dbName)
-    
-    var sessionID int
-    err := dbConn.QueryRow(query, param).Scan(&sessionID)
-    if err == sql.ErrNoRows {
-        return 0, fmt.Errorf("активный процесс BACKUP для базы '%s' не найден", dbName)
-    }
-    if err != nil {
-        return 0, fmt.Errorf("ошибка при запросе session_id для BACKUP базы '%s': %w", dbName, err)
-    }
-    return sessionID, nil
-}
 
 // GetDatabases - Получение списка пользовательских баз данных
 func GetDatabases() ([]Database, error) {

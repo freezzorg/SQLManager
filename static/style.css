@@ -41,8 +41,9 @@ li.selected { background-color: #d1e7ff; }
 .db-status-icon .offline { color: #f44336; }
 .db-status-icon .error { color: #9E9E9E; }
 .db-status-icon .unknown { color: #2196F3; }
+.db-status-icon .backing-up { color: #FFC107; } /* Цвет для статуса бэкапа */
 
-.restore-progress-container {
+.restore-progress-container, .backup-progress-container { /* Объединяем стили для прогресс-контейнеров */
     display: flex;
     align-items: center;
     width: 100%; /* Занимает всю ширину под именем БД */
@@ -85,8 +86,8 @@ li.selected { background-color: #d1e7ff; }
     font-size: 0.7em;
     border-radius: 3px;
     cursor: pointer;
-    flex-shrink: 0; /* Не сжимается */
-    height: auto; /* Автоматическая высота */
+    flex-shrink: 0;
+    height: auto;
 }
 .cancel-restore-btn-inline:hover {
     background-color: #da190b;
@@ -94,11 +95,13 @@ li.selected { background-color: #d1e7ff; }
 
 button { padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; height: 30px; box-sizing: border-box; }
 .refresh-btn { background-color: #2196F3; color: white; }
-.refresh-btn.left { width: 100%; }
+.refresh-btn.left { width: calc(50% - 2.5px); } /* Изменено для одинаковой ширины */
 .refresh-btn.right { width: 100px; }
 .refresh-btn:hover { background-color: #1976D2; }
-.delete-btn { background-color: #f44336; color: white; width: 100%; }
+.delete-btn { background-color: #f44336; color: white; width: calc(50% - 2.5px); } /* Изменено для одинаковой ширины */
 .delete-btn:hover { background-color: #da190b; }
+.backup-btn { background-color: #FFC107; color: black; width: calc(50% - 2.5px); } /* Желтая кнопка "Бэкап" */
+.backup-btn:hover { background-color: #FFB300; }
 .clear-btn { background-color: #f44336; color: white; width: 100px; }
 .clear-btn:hover { background-color: #da190b; }
 .button-group { display: flex; gap: 5px; }
@@ -130,6 +133,7 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 .status-online { background-color: #4CAF50; }
 .status-offline { background-color: #f44336; }
 .status-restoring { background-color: #FF9800; }
+.status-backing-up { background-color: #FFC107; } /* Цвет для индикатора статуса бэкапа */
 .status-error { background-color: #9E9E9E; }
 .status-unknown { background-color: #2196F3; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }

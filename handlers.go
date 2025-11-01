@@ -269,29 +269,6 @@ func handleCancelRestoreProcess(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName)})
 }
 
-// API для отмены создания бэкапа базы данных
-func handleCancelBackupProcess(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
-    
-    dbName := r.URL.Query().Get("name")
-    if dbName == "" {
-        http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
-        return
-    }
-    
-    if err := cancelBackupProcess(dbName); err != nil {
-        LogWebError(fmt.Sprintf("Не удалось отменить создание бэкапа (удалить файл бэкапа для БД %s): %v", dbName, err))
-        http.Error(w, fmt.Sprintf("Ошибка отмены создания бэкапа: %v", err), http.StatusInternalServerError)
-        return
-    }
-
-    w.WriteHeader(http.StatusOK)
-    LogWebInfo(fmt.Sprintf("Создание бэкапа базы данных '%s' отменено (файл бэкапа удален).", dbName))
-    json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Создание бэкапа базы данных '%s' отменено (файл бэкапа удален).", dbName)})
-}
 
 // API для получения краткого лога
 func handleGetBriefLog(w http.ResponseWriter, r *http.Request) {

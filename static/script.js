@@ -195,13 +195,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <div class="progress-fill" style="width: 0%;"></div>
                             </div>
                             <span class="progress-text">0%</span>
-                            <button class="cancel-backup-btn-inline" data-dbname="${db.name}">Отменить</button>
                         `;
                         li.appendChild(backupProgressContainer);
-                        backupProgressContainer.querySelector('.cancel-backup-btn-inline').addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            cancelBackup(db.name);
-                        });
                     }
                     backupProgressContainer.style.display = 'flex';
                     startBackupProgressPolling(db.name);
@@ -441,43 +436,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const cancelBackup = async (dbName) => {
-        if (!dbName) {
-            alert('Невозможно отменить: имя бэкапируемой базы не определено.');
-            fetchDatabases();
-            return;
-        }
-
-        if (!confirm(`Вы действительно хотите отменить создание бэкапа базы данных '${dbName}'? Файл бэкапа будет удален.`)) {
-            return;
-        }
-
-        addLogEntry(`Отмена создания бэкапа базы данных '${dbName}'...`);
-
-        try {
-            const response = await fetch(`/api/cancel-backup?name=${encodeURIComponent(dbName)}`, {
-                method: 'POST',
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
-            }
-
-            const result = await response.json();
-            addLogEntry(`Отмена создания бэкапа базы '${dbName}' успешно завершена`);
-            if (activeBackupPollers[dbName]) {
-                clearInterval(activeBackupPollers[dbName]);
-                delete activeBackupPollers[dbName];
-            }
-
-        } catch (error) {
-            console.error('Ошибка отмены бэкапа:', error);
-            addLogEntry(`ОШИБКА: Не удалось отменить бэкап: ${error.message}`);
-        } finally {
-            fetchDatabases();
-        }
-    };
 
     // --- Обработчики событий ---
 
@@ -564,9 +522,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (event.target.classList.contains('cancel-restore-btn-inline')) {
             const dbName = event.target.dataset.dbname;
             cancelRestore(dbName);
-        } else if (event.target.classList.contains('cancel-backup-btn-inline')) { // Обработчик для кнопки отмены бэкапа
-            const dbName = event.target.dataset.dbname;
-            cancelBackup(dbName);
         }
     });
 
@@ -590,7 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             updateRestoreProgressDisplay(dbName, progress);
 
-            if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'cancelled' || progress.status === 'not_found') {
+            if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'not_found') {
                 let statusMessage = '';
                 switch (progress.status) {
                     case 'completed':
@@ -599,11 +554,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     case 'failed':
                         statusMessage = 'завершено с ошибкой';
                         break;
-                    case 'cancelled':
-                        statusMessage = 'отменено';
-                        break;
                     case 'not_found':
-                        statusMessage = 'не найдено (возможно, уже завершено или отменено)';
+                        statusMessage = 'не найдено (возможно, уже завершено)';
                         break;
                 }
                 addLogEntry(`Восстановление базы '${dbName}' ${statusMessage}`);
@@ -751,10 +703,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'failed':
                     iconClass = 'fas fa-exclamation-triangle error';
                     title = 'Ошибка бэкапа';
-                    break;
-                case 'cancelled':
-                    iconClass = 'fas fa-times-circle offline';
-                    title = 'Бэкап отменен';
                     break;
                 case 'not_found':
                     return;
