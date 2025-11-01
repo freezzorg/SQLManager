@@ -18,6 +18,11 @@ type RestoreRequest struct {
 	RestoreDateTime string `json:"restoreDateTime"` // Дата и время для PIRT (DD.MM.YYYY HH:MM:SS)
 }
 
+// Структура для запроса на бэкап
+type BackupRequest struct {
+    DBName string `json:"dbName"` // Имя базы данных для бэкапа
+}
+
 // --- Вспомогательные функции ---
 
 // Middleware для проверки IP-адреса клиента
@@ -212,6 +217,33 @@ func handleStartRestore(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Восстановление базы данных '%s' из бэкапа '%s' запущено.", req.NewDBName, req.BackupBaseName)})
 }
 
+// API для запуска создания бэкапа базы данных
+func handleStartBackup(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+        return
+    }
+
+    var req BackupRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "Неверный формат запроса: "+err.Error(), http.StatusBadRequest)
+        return
+    }
+
+    if req.DBName == "" {
+        http.Error(w, "Не указано имя базы данных для бэкапа.", http.StatusBadRequest)
+        return
+    }
+
+    if err := startBackup(req.DBName); err != nil {
+        LogWebError(fmt.Sprintf("Не удалось начать создание бэкапа базы данных %s: %v", req.DBName, err))
+        http.Error(w, fmt.Sprintf("Ошибка запуска создания бэкапа: %v", err), http.StatusInternalServerError)
+        return
+    }
+
+    w.WriteHeader(http.StatusOK)
+    json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Создание бэкапа базы данных '%s' запущено.", req.DBName)})
+}
 
 // API для отмены восстановления базы данных (УДАЛЕНИЕ БД)
 func handleCancelRestoreProcess(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +267,30 @@ func handleCancelRestoreProcess(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusOK)
     LogWebInfo(fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName))
     json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName)})
+}
+
+// API для отмены создания бэкапа базы данных
+func handleCancelBackupProcess(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    dbName := r.URL.Query().Get("name")
+    if dbName == "" {
+        http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
+        return
+    }
+    
+    if err := cancelBackupProcess(dbName); err != nil {
+        LogWebError(fmt.Sprintf("Не удалось отменить создание бэкапа (удалить файл бэкапа для БД %s): %v", dbName, err))
+        http.Error(w, fmt.Sprintf("Ошибка отмены создания бэкапа: %v", err), http.StatusInternalServerError)
+        return
+    }
+
+    w.WriteHeader(http.StatusOK)
+    LogWebInfo(fmt.Sprintf("Создание бэкапа базы данных '%s' отменено (файл бэкапа удален).", dbName))
+    json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Создание бэкапа базы данных '%s' отменено (файл бэкапа удален).", dbName)})
 }
 
 // API для получения краткого лога
@@ -269,6 +325,30 @@ func handleGetRestoreProgress(w http.ResponseWriter, r *http.Request) {
         // Возвращаем пустой прогресс или статус "not_found"
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(&restoreProgress{Status: "not_found"})
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(progress)
+}
+
+// API для получения прогресса создания бэкапа конкретной базы данных
+func handleGetBackupProgress(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+        return
+    }
+
+    dbName := r.URL.Query().Get("name")
+    if dbName == "" {
+        http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
+        return
+    }
+
+    progress := getBackupProgress(dbName)
+    if progress == nil {
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(&backupProgress{Status: "not_found"})
         return
     }
 

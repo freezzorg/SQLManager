@@ -32,7 +32,7 @@ type Config struct {
 // Структура для отображения базы данных в веб-интерфейсе
 type Database struct {
     Name       string `json:"name"`
-    State      string `json:"state"` // Состояние базы (online, offline, restoring, error)
+    State      string `json:"state"` // Состояние базы (online, offline, restoring, backing_up, error)
 }
 
 // Структура для отображения бэкапа (используется для списка директорий)
