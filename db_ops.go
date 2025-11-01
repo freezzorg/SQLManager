@@ -639,8 +639,7 @@ func startBackup(dbName string) error {
 		BackupProgressesMutex.Unlock()
 
 		// 2. Выполняем команду BACKUP DATABASE
-		// STATS = 10 будет выводить прогресс каждые 10%
-		backupQuery := fmt.Sprintf("BACKUP DATABASE [%s] TO DISK = N'%s' WITH INIT, STATS = 10", dbName, backupFilePath)
+		backupQuery := fmt.Sprintf("BACKUP DATABASE [%s] TO DISK = N'%s' WITH INIT", dbName, backupFilePath)
 		LogDebug(fmt.Sprintf("Выполнение BACKUP DATABASE: %s", backupQuery))
 
 		_, err = dbConn.Exec(backupQuery)
@@ -796,8 +795,7 @@ func getBackupProgress(dbName string) *backupProgress {
 			SELECT r.percent_complete, r.session_id, t.text
 			FROM sys.dm_exec_requests r
 			CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
-			WHERE r.command LIKE '%BACKUP%'
-			   OR r.status = 'suspended';
+			WHERE r.command LIKE '%BACKUP%';
 		`
 		rows, err := dbConn.Query(query)
 		if err != nil {
@@ -819,21 +817,17 @@ func getBackupProgress(dbName string) *backupProgress {
 			// Проверяем, содержит ли текст команды имя целевой базы данных
 			if commandText.Valid && strings.Contains(commandText.String, fmt.Sprintf("DATABASE [%s]", dbName)) {
 				progress.Percentage = int(percentComplete)
-				progress.SessionID = sessionID // Обновляем SessionID, если он изменился или был не установлен
+				progress.SessionID = sessionID
 				foundProgress = true
+				LogDebug(fmt.Sprintf("Прогресс бэкапа для '%s': %d%% (SessionID: %d)", dbName, progress.Percentage, progress.SessionID))
 				break
 			}
 		}
 
 		if !foundProgress {
-			// Если активный процесс не найден, возможно, он завершился или был отменен
-			// Устанавливаем статус "not_found" или "completed" в зависимости от логики
-			// В данном случае, если процесс не найден, но статус "in_progress", это означает, что он завершился
-			// или был прерван без обновления статуса.
-			// Для простоты, если не нашли, считаем, что он завершился.
-			progress.Status = "completed"
-			progress.Percentage = 100
-			progress.EndTime = time.Now()
+			// Если активный процесс не найден, это может означать, что он завершился.
+			// Оставляем текущий статус и процент, чтобы избежать мигания.
+			LogDebug(fmt.Sprintf("Активный процесс BACKUP для базы '%s' не найден. Возможно, завершен или еще не начался.", dbName))
 		}
 	}
 
