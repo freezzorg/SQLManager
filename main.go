@@ -5,49 +5,38 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"sync"
+
+	"github.com/freezzorg/SQLManager/internal/config"
+	"github.com/freezzorg/SQLManager/internal/handlers"
+	"github.com/freezzorg/SQLManager/internal/logging"
 
 	// Используем стандартный драйвер для MSSQL
 	_ "github.com/denisenkom/go-mssqldb"
-	"gopkg.in/yaml.v3"
 )
-
-var appConfig Config
-var logMutex sync.Mutex // Мьютекс для безопасной записи в лог-файл (используется в logging.go)
-var briefLog []LogEntry // Краткий лог для веб-интерфейса (используется в logging.go)
 
 // Главная функция, запускающая приложение
 func main() {
     // 1. Загрузка конфигурации 
-    if err := loadConfig("config.yaml"); err != nil {
+    appConfig, err := config.LoadConfig("config.yaml")
+    if err != nil {
         log.Fatalf("Ошибка загрузки конфигурации: %v", err)
     }
 
-    // 2. Настройка логирования в файл (функция определена в logging.go)
-    setupLogger(appConfig.App.LogFile, appConfig.App.LogLevel)
+    // 2. Настройка логирования в файл
+    logging.SetupLogger(appConfig.App.LogFile, appConfig.App.LogLevel)
     
     // 3. Установка подключения к MSSQL
     db, err := setupDBConnection(appConfig.MSSQL)
     if err != nil {
-        // Мы используем LogError, который пишет и в файл, и в консоль
-        LogError(fmt.Sprintf("Ошибка подключения к SQL Server (%s): %v", appConfig.MSSQL.Server, err))
+        // Мы используем LogError, который пишет и в файл
+        logging.LogError(fmt.Sprintf("Ошибка подключения к SQL Server (%s): %v", appConfig.MSSQL.Server, err))
         return
     }
-    LogInfo("Успешное подключение к SQL Server.")
+    logging.LogInfo("Успешное подключение к SQL Server.")
     defer db.Close() // Закрываем соединение при завершении работы приложения
 
     // 4. Запуск веб-сервера
-    startWebServer(db, appConfig.App.BindAddress)
-}
-
-// Загружает конфигурацию из файла
-func loadConfig(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return yaml.Unmarshal(data, &appConfig)
+    startWebServer(db, appConfig, appConfig.App.BindAddress)
 }
 
 // Устанавливает соединение с SQL Server
@@ -73,28 +62,28 @@ func setupDBConnection(cfg struct {
 }
 
 // Запускает веб-сервер
-func startWebServer(db *sql.DB, addr string) {
+func startWebServer(db *sql.DB, appConfig *config.Config, addr string) {
     // Настройка маршрутов
     // Обслуживание статических файлов из директории "static"
     http.Handle("/", http.FileServer(http.Dir("./static")))
     
     // Создаем экземпляр AppHandlers
-    handlers := &AppHandlers{DB: db}
+    appHandlers := &handlers.AppHandlers{DB: db, AppConfig: appConfig}
 
     // API маршруты:
-    http.HandleFunc("/api/databases", authMiddleware(handlers.handleGetDatabases))
-    http.HandleFunc("/api/delete", authMiddleware(handlers.handleDeleteDatabase)) 
-    http.HandleFunc("/api/backups", authMiddleware(handlers.handleGetBackups))
-    http.HandleFunc("/api/restore", authMiddleware(handlers.handleStartRestore)) 
-    http.HandleFunc("/api/log", authMiddleware(handleGetBriefLog)) // handleGetBriefLog не является методом AppHandlers
-    http.HandleFunc("/api/cancel-restore", authMiddleware(handlers.handleCancelRestoreProcess)) 
-    http.HandleFunc("/api/restore-progress", authMiddleware(handlers.handleGetRestoreProgress))
-    http.HandleFunc("/api/backup", authMiddleware(handlers.handleStartBackup))
-    http.HandleFunc("/api/backup-progress", authMiddleware(handlers.handleGetBackupProgress))
+    http.HandleFunc("/api/databases", appHandlers.AuthMiddleware(appHandlers.HandleGetDatabases))
+    http.HandleFunc("/api/delete", appHandlers.AuthMiddleware(appHandlers.HandleDeleteDatabase)) 
+    http.HandleFunc("/api/backups", appHandlers.AuthMiddleware(appHandlers.HandleGetBackups))
+    http.HandleFunc("/api/restore", appHandlers.AuthMiddleware(appHandlers.HandleStartRestore)) 
+    http.HandleFunc("/api/log", appHandlers.AuthMiddleware(appHandlers.HandleGetLog))
+    http.HandleFunc("/api/cancel-restore", appHandlers.AuthMiddleware(appHandlers.HandleCancelRestoreProcess)) 
+    http.HandleFunc("/api/restore-progress", appHandlers.AuthMiddleware(appHandlers.HandleGetRestoreProgress))
+    http.HandleFunc("/api/backup", appHandlers.AuthMiddleware(appHandlers.HandleStartBackup))
+    http.HandleFunc("/api/backup-progress", appHandlers.AuthMiddleware(appHandlers.HandleGetBackupProgress))
 
-    LogInfo(fmt.Sprintf("Веб-сервер запущен на %s", addr))
+    logging.LogInfo(fmt.Sprintf("Веб-сервер запущен на %s", addr))
     // Запускаем веб-сервер
     if err := http.ListenAndServe(addr, nil); err != nil {
-        LogError(fmt.Sprintf("Ошибка запуска веб-сервера: %v", err))
+        logging.LogError(fmt.Sprintf("Ошибка запуска веб-сервера: %v", err))
     }
 }

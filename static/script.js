@@ -20,13 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmationSection = document.getElementById('confirmation-section'); // Добавляем ссылку на секцию подтверждения
 
     let selectedDatabase = null;
-    // let restoreInProgress = false; // Больше не нужна, статус будет в restoreProgresses
 
     const restoreProgressPollingInterval = 3000; // Интервал опроса прогресса в мс
     const activeRestorePollers = {}; // Хранит setInterval ID для каждой восстанавливаемой БД
     const activeBackupPollers = {}; // Хранит setInterval ID для каждой бэкапируемой БД
-
-    // --- Утилиты ---
 
     // --- Утилиты ---
 
@@ -62,17 +59,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fetchBriefLog = async () => {
         try {
-            const response = await fetch('/api/log');
-            if (!response.ok) throw new Error('Ошибка получения лога');
-            const logEntries = await response.json();
+            const response = await makeApiRequest('/api/log');
+            if (response.ok) {
+                const logEntries = await response.json();
 
-            briefLog.innerHTML = '';
-            logEntries.reverse().forEach(entry => {
-                const li = document.createElement('li');
-                const time = formatDateTime(new Date(entry.timestamp), 'log');
-                li.textContent = `${time} ${entry.message}`;
-                briefLog.appendChild(li);
-            });
+                briefLog.innerHTML = '';
+                logEntries.reverse().forEach(entry => {
+                    const li = document.createElement('li');
+                    const time = formatDateTime(new Date(entry.timestamp), 'log');
+                    li.textContent = `${time} ${entry.message}`;
+                    briefLog.appendChild(li);
+                });
+            } else {
+                const errorText = await response.text();
+                throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
+            }
         } catch (error) {
             console.error('Ошибка получения краткого лога:', error);
         }
@@ -108,13 +109,35 @@ document.addEventListener('DOMContentLoaded', () => {
         return container;
     };
 
+    // Функция для выполнения API-запросов с обработкой ошибок
+    const makeApiRequest = async (url, options = {}) => {
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            });
+
+            // Возвращаем ответ как есть, чтобы вызывающая сторона могла сама обработать статус
+            return response;
+        } catch (networkError) {
+            // Сетевые ошибки (например, потеря соединения, сервер недоступен) логируются только в консоль
+            // Согласно требованиям - сетевые ошибки должны логироваться только в файл, а не пользователю
+            console.error('Сетевая ошибка при выполнении запроса:', networkError);
+            throw networkError;
+        }
+    };
+
     // --- API Функции ---
 
     const fetchDatabases = async () => {
         try {
-            const response = await fetch('/api/databases');
+            const response = await makeApiRequest('/api/databases');
             if (!response.ok) {
-                throw new Error(`Ошибка сервера: ${response.status}`);
+                const errorText = await response.text();
+                throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
             }
             const databases = await response.json();
 
@@ -238,7 +261,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fetchBackups = async () => {
         try {
-            const response = await fetch('/api/backups');
+            const response = await makeApiRequest('/api/backups');
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(errorText);
@@ -322,7 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         try {
-            const response = await fetch('/api/restore', {
+            const response = await makeApiRequest('/api/restore', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -340,8 +363,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchDatabases();
             }
         } catch (error) {
-            addLogEntry(`КРИТИЧЕСКАЯ ОШИБКА: Проблема с сетевым запросом при восстановлении базы '${newDbName}': ${error.message}`);
-            console.error('Сетевая ошибка:', error);
+            // Сетевые ошибки логируются только в консоль, а не пользователю
+            console.error('Сетевая ошибка при восстановлении:', error);
             fetchDatabases();
         }
     }
@@ -360,20 +383,20 @@ document.addEventListener('DOMContentLoaded', () => {
         addLogEntry(`Отмена восстановления базы данных '${dbName}'...`);
 
         try {
-            const response = await fetch(`/api/cancel-restore?name=${encodeURIComponent(dbName)}`, {
+            const response = await makeApiRequest(`/api/cancel-restore?name=${encodeURIComponent(dbName)}`, {
                 method: 'POST',
             });
 
-            if (!response.ok) {
+            if (response.ok) {
+                const result = await response.json();
+                addLogEntry(`Отмена восстановления базы '${dbName}' успешно завершена`);
+                if (activeRestorePollers[dbName]) {
+                    clearInterval(activeRestorePollers[dbName]);
+                    delete activeRestorePollers[dbName];
+                }
+            } else {
                 const errorText = await response.text();
                 throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
-            }
-
-            const result = await response.json();
-            addLogEntry(`Отмена восстановления базы '${dbName}' успешно завершена`);
-            if (activeRestorePollers[dbName]) {
-                clearInterval(activeRestorePollers[dbName]);
-                delete activeRestorePollers[dbName];
             }
 
         } catch (error) {
@@ -393,7 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addLogEntry(`Начато создание бэкапа базы '${dbName}'...`);
 
         try {
-            const response = await fetch('/api/backup', {
+            const response = await makeApiRequest('/api/backup', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -411,8 +434,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchDatabases();
             }
         } catch (error) {
-            addLogEntry(`КРИТИЧЕСКАЯ ОШИБКА: Проблема с сетевым запросом при создании бэкапа базы '${dbName}': ${error.message}`);
-            console.error('Сетевая ошибка:', error);
+            // Сетевые ошибки логируются только в консоль, а не пользователю
+            console.error('Сетевая ошибка при создании бэкапа:', error);
             fetchDatabases();
         }
     };
@@ -454,19 +477,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const response = await fetch('/api/databases');
-            const databases = await response.json();
-            const dbExists = databases.some(db => db.name.toLowerCase() === newDbName.toLowerCase());
+            const response = await makeApiRequest('/api/databases');
+            if (response.ok) {
+                const databases = await response.json();
+                const dbExists = databases.some(db => db.name.toLowerCase() === newDbName.toLowerCase());
 
-            if (dbExists) {
-                confirmRestoreButtons.style.display = 'flex';
-                confirmationSection.style.display = 'block';
-                restoreDbBtn.style.display = 'none';
+                if (dbExists) {
+                    confirmRestoreButtons.style.display = 'flex';
+                    confirmationSection.style.display = 'block';
+                    restoreDbBtn.style.display = 'none';
+                } else {
+                    startRestoreProcess();
+                    confirmRestoreButtons.style.display = 'none';
+                    confirmationSection.style.display = 'none';
+                    restoreDbBtn.style.display = 'block';
+                }
             } else {
-                startRestoreProcess();
-                confirmRestoreButtons.style.display = 'none';
-                confirmationSection.style.display = 'none';
-                restoreDbBtn.style.display = 'block';
+                const errorText = await response.text();
+                throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
             }
         } catch (error) {
             console.error('Ошибка при проверке существования БД перед восстановлением:', error);
@@ -508,35 +536,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fetchRestoreProgress = async (dbName) => {
         try {
-            const response = await fetch(`/api/restore-progress?name=${encodeURIComponent(dbName)}`);
-            if (!response.ok) {
-                throw new Error(`Ошибка получения прогресса для ${dbName}`);
-            }
-            const progress = await response.json();
+            const response = await makeApiRequest(`/api/restore-progress?name=${encodeURIComponent(dbName)}`);
+            if (response.ok) {
+                const progress = await response.json();
 
-            updateRestoreProgressDisplay(dbName, progress);
+                updateRestoreProgressDisplay(dbName, progress);
 
-            if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'not_found') {
-                let statusMessage = '';
-                switch (progress.status) {
-                    case 'completed':
-                        statusMessage = 'успешно завершено';
-                        break;
-                    case 'failed':
-                        statusMessage = 'завершено с ошибкой';
-                        break;
-                    case 'not_found':
-                        statusMessage = 'не найдено (возможно, уже завершено)';
-                        break;
+                if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'not_found') {
+                    let statusMessage = '';
+                    switch (progress.status) {
+                        case 'completed':
+                            statusMessage = 'успешно завершено';
+                            break;
+                        case 'failed':
+                            statusMessage = 'завершено с ошибкой';
+                            break;
+                        case 'not_found':
+                            statusMessage = 'не найдено (возможно, уже завершено)';
+                            break;
+                    }
+                    addLogEntry(`Восстановление базы '${dbName}' ${statusMessage}`);
+                    if (activeRestorePollers[dbName]) {
+                        clearInterval(activeRestorePollers[dbName]);
+                        delete activeRestorePollers[dbName];
+                    }
+                    fetchDatabases();
                 }
-                addLogEntry(`Восстановление базы '${dbName}' ${statusMessage}`);
-                if (activeRestorePollers[dbName]) {
-                    clearInterval(activeRestorePollers[dbName]);
-                    delete activeRestorePollers[dbName];
-                }
-                fetchDatabases();
+            } else {
+                const errorText = await response.text();
+                throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
             }
-
         } catch (error) {
             console.error(`Ошибка получения прогресса для ${dbName}:`, error);
             addLogEntry(`ОШИБКА: Не удалось получить прогресс для базы '${dbName}': ${error.message}`);
@@ -602,33 +631,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fetchBackupProgress = async (dbName) => {
         try {
-            const response = await fetch(`/api/backup-progress?name=${encodeURIComponent(dbName)}`);
-            if (!response.ok) {
-                throw new Error(`Ошибка получения прогресса бэкапа для ${dbName}`);
-            }
-            const progress = await response.json();
+            const response = await makeApiRequest(`/api/backup-progress?name=${encodeURIComponent(dbName)}`);
+            if (response.ok) {
+                const progress = await response.json();
 
-            updateBackupProgressDisplay(dbName, progress);
+                updateBackupProgressDisplay(dbName, progress);
 
-            if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'not_found') {
-                let statusMessage = '';
-                switch (progress.status) {
-                    case 'completed':
-                        statusMessage = 'успешно завершено';
-                        break;
-                    case 'failed':
-                        statusMessage = 'завершено с ошибкой';
-                        break;
-                    case 'not_found':
-                        statusMessage = 'не найдено (возможно, уже завершено)';
-                        break;
+                if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'not_found') {
+                    let statusMessage = '';
+                    switch (progress.status) {
+                        case 'completed':
+                            statusMessage = 'успешно завершено';
+                            break;
+                        case 'failed':
+                            statusMessage = 'завершено с ошибкой';
+                            break;
+                        case 'not_found':
+                            statusMessage = 'не найдено (возможно, уже завершено)';
+                            break;
+                    }
+                    addLogEntry(`Создание бэкапа базы '${dbName}' ${statusMessage}`);
+                    if (activeBackupPollers[dbName]) {
+                        clearInterval(activeBackupPollers[dbName]);
+                        delete activeBackupPollers[dbName];
+                    }
+                    fetchDatabases();
                 }
-                addLogEntry(`Создание бэкапа базы '${dbName}' ${statusMessage}`);
-                if (activeBackupPollers[dbName]) {
-                    clearInterval(activeBackupPollers[dbName]);
-                    delete activeBackupPollers[dbName];
-                }
-                fetchDatabases();
+            } else {
+                const errorText = await response.text();
+                throw new Error(`Ошибка сервера: ${response.status} - ${errorText}`);
             }
 
         } catch (error) {

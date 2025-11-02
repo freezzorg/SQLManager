@@ -1,7 +1,10 @@
-package main
+package config
 
 import (
+	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Конфигурационная структура, соответствующая config.yaml
@@ -45,4 +48,19 @@ type BackupFile struct {
 type LogEntry struct {
 	Timestamp time.Time `json:"timestamp"`
 	Message   string    `json:"message"`
+}
+
+// Загружает конфигурацию из файла
+func LoadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	
+	return &config, nil
 }

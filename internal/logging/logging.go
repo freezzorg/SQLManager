@@ -1,17 +1,22 @@
-package main
+package logging
 
 import (
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/freezzorg/SQLManager/internal/config"
 )
 
 var fileLogger *log.Logger
 var currentLogLevel int // 0: ERROR, 1: INFO, 2: DEBUG
+var logMutex sync.Mutex // Мьютекс для безопасной записи в лог-файл
+var briefLog []config.LogEntry // Краткий лог для веб-интерфейса
 
-func setupLogger(logFile string, level string) {
+func SetupLogger(logFile string, level string) {
     // Определение уровня логирования
     switch strings.ToUpper(level) {
     case "DEBUG":
@@ -42,7 +47,7 @@ func recordBriefLog(message string) {
     logMutex.Lock()
     defer logMutex.Unlock()
     
-    entry := LogEntry{
+    entry := config.LogEntry{
         Timestamp: time.Now(),
         Message:   message,
     }
@@ -91,4 +96,16 @@ func LogWebInfo(message string) {
 func LogWebError(message string) {
     fileLogger.Printf("[ERROR] %s", message)
     RecordWebLog("ОШИБКА: " + message) // Запись в краткий лог для веб-интерфейса
+}
+
+// GetBriefLog - Получение краткого лога
+func GetBriefLog() []config.LogEntry {
+    logMutex.Lock()
+    defer logMutex.Unlock()
+    
+    // Создаем копию лога, чтобы избежать гонок
+    logCopy := make([]config.LogEntry, len(briefLog))
+    copy(logCopy, briefLog)
+    
+    return logCopy
 }
