@@ -743,9 +743,13 @@ func CancelRestoreProcess(db *sql.DB, dbName string) error {
 		return fmt.Errorf("восстановление базы '%s' не найдено", dbName)
 	}
 
-	if progress.Status == "completed" || progress.Status == "failed" || progress.Status == "cancelled" {
+	if progress.Status == "failed" || progress.Status == "cancelled" {
 		delete(RestoreProgresses, dbName)
-	return DeleteDatabase(db, dbName)
+		return DeleteDatabase(db, dbName)
+	} else if progress.Status == "completed" {
+		// При успешном завершении не удаляем базу, а просто удаляем запись о процессе
+		delete(RestoreProgresses, dbName)
+		return nil
 	}
 
 	if progress.CancelFunc != nil {
