@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const restoreProgressPollingInterval = 3000; // Интервал опроса прогресса в мс
     const activeRestorePollers = {}; // Хранит setInterval ID для каждой восстанавливаемой БД
     const activeBackupPollers = {}; // Хранит setInterval ID для каждой бэкапируемой БД
+    const inProgressRestores = new Set(); // Хранит имена баз, которые находятся в процессе восстановления
 
     // --- Утилиты ---
 
@@ -331,7 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } catch (e) {
                 console.error("Ошибка форматирования даты:", e);
-                addLogEntry(`ОШИБКА: Не удалось обработать дату/время: ${restoreDateTime}. Убедитесь, что формат: ГГГГ-ММ-ДДТЧЧ:ММ:СС`);
+                addLogEntry(`ОШИБКА: Не удалось обработать дату/время: ${restoreDateTime}. Убедитесь, что формат: ГГГГ-М-ДДТЧЧ:ММ:СС`);
                 return;
             }
         }
@@ -354,8 +355,45 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (response.ok) {
+                // Добавляем базу в список восстанавливаемых
+                inProgressRestores.add(newDbName);
+                
+                // Проверяем, существует ли база в списке баз
+                const databasesResponse = await makeApiRequest('/api/databases');
+                if (databasesResponse.ok) {
+                    const databases = await databasesResponse.json();
+                    const dbExists = databases.some(db => db.name.toLowerCase() === newDbName.toLowerCase());
+
+                    // Если база не существует в списке, добавляем временный элемент с прогрессбаром
+                    if (!dbExists) {
+                        // Создаем временный элемент списка базы
+                        const li = document.createElement('li');
+                        li.dataset.dbname = newDbName;
+                        li.className = 'db-item db-state-restoring';
+                        
+                        const dbNameSpan = document.createElement('span');
+                        dbNameSpan.className = 'db-name';
+                        dbNameSpan.textContent = newDbName;
+                        li.prepend(dbNameSpan);
+
+                        const statusIconSpan = document.createElement('span');
+                        statusIconSpan.className = 'db-status-icon';
+                        li.insertBefore(statusIconSpan, dbNameSpan.nextSibling);
+                        statusIconSpan.innerHTML = '<i class="fas fa-sync-alt fa-spin restoring" title="Восстанавливается"></i>';
+                        statusIconSpan.title = "restoring";
+
+                        // Создаем контейнер для прогресса восстановления
+                        const restoreProgressContainer = createRestoreProgressContainer(newDbName);
+                        restoreProgressContainer.style.display = 'flex';
+                        li.appendChild(restoreProgressContainer);
+
+                        // Добавляем элемент в список баз
+                        databaseList.appendChild(li);
+                    }
+                }
+                
                 startRestoreProgressPolling(newDbName);
-                fetchDatabases();
+                // fetchDatabases(); // Обновляем список баз, чтобы синхронизировать сервером
             } else {
                 const errorText = await response.text();
                 addLogEntry(`ОШИБКА: Не удалось запустить восстановление базы '${newDbName}'. Сервер вернул: ${response.status} - ${errorText}`);

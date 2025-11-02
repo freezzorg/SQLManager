@@ -649,10 +649,13 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 	}
 	BackupProgressesMutex.Unlock()
 
+	logging.LogWebInfo(fmt.Sprintf("Начато создание бэкапа базы '%s'...", dbName))
+
 	go func() {
 		// 1. Проверяем и создаем каталог для бэкапов
 		backupDir, err := checkAndCreateBackupDir(dbName, smbSharePath)
 		if err != nil {
+			logging.LogError(fmt.Sprintf("Ошибка проверки/создания каталога бэкапов для базы '%s': %v", dbName, err))
 			BackupProgressesMutex.Lock()
 			if progress := BackupProgresses[dbName]; progress != nil {
 				progress.Status = "failed"
@@ -667,6 +670,8 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 		backupFileName := fmt.Sprintf("%s_%s.bak", dbName, time.Now().Format("20060102_150405"))
 		backupFilePath := filepath.Join(backupDir, backupFileName)
 
+		logging.LogDebug(fmt.Sprintf("Путь к файлу бэкапа для базы '%s': %s", dbName, backupFilePath))
+
 		BackupProgressesMutex.Lock()
 		if progress := BackupProgresses[dbName]; progress != nil {
 			progress.Status = "in_progress"
@@ -677,9 +682,12 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 		// 2. Выполняем команду BACKUP DATABASE
 	backupQuery := fmt.Sprintf("BACKUP DATABASE [%s] TO DISK = N'%s' WITH INIT", dbName, backupFilePath)
 
+		logging.LogDebug(fmt.Sprintf("Выполнение BACKUP DATABASE: %s", backupQuery))
+
 		_, err = db.Exec(backupQuery)
 		
 		if err != nil {
+			logging.LogError(fmt.Sprintf("Ошибка создания бэкапа базы '%s': %v", dbName, err))
 			BackupProgressesMutex.Lock()
 			if progress := BackupProgresses[dbName]; progress != nil {
 				progress.Status = "failed"
@@ -690,6 +698,7 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 			return
 		}
 
+		logging.LogWebInfo(fmt.Sprintf("Создание бэкапа базы '%s' успешно завершено", dbName))
 		BackupProgressesMutex.Lock()
 	if progress := BackupProgresses[dbName]; progress != nil {
 			progress.Percentage = 100
