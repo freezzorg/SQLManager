@@ -1,12 +1,12 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -87,118 +87,119 @@ func getBackupBaseNames(root string, blacklist []string) ([]BackupFile, error) {
 
 // --- API-обработчики ---
 
-// API для получения списка баз данных
-func handleGetDatabases(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
-    
-    databases, err := GetDatabases()
-    if err != nil {
-        LogWebError(fmt.Sprintf("Не удалось получить список баз данных: %v", err))
-        http.Error(w, "Ошибка сервера при получении списка баз данных", http.StatusInternalServerError)
-        return
-    }
+// AppHandlers - Структура для хранения зависимостей обработчиков, таких как *sql.DB
+type AppHandlers struct {
+	DB *sql.DB
+}
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(databases)
+// API для получения списка баз данных
+func (h *AppHandlers) handleGetDatabases(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+
+	databases, err := GetDatabases(h.DB)
+	if err != nil {
+		LogWebError(fmt.Sprintf("Не удалось получить список баз данных: %v", err))
+		http.Error(w, "Ошибка сервера при получении списка баз данных", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(databases)
 }
 
 // API для удаления базы данных
-func handleDeleteDatabase(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodDelete {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
+func (h *AppHandlers) handleDeleteDatabase(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
 
-    dbName := r.URL.Query().Get("name")
-    if dbName == "" {
-        http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
-        return
-    }
-    
-    if err := deleteDatabase(dbName); err != nil {
-        LogWebError(fmt.Sprintf("Не удалось удалить базу данных %s: %v", dbName, err))
-        http.Error(w, fmt.Sprintf("Ошибка удаления базы данных: %v", err), http.StatusInternalServerError)
-        return
-    }
+	dbName := r.URL.Query().Get("name")
+	if dbName == "" {
+		http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
+		return
+	}
+	// Валидация dbName
+	if !isValidDBName(dbName) {
+		LogWebError(fmt.Sprintf("Недопустимое имя базы данных: %s", dbName))
+		http.Error(w, "Недопустимое имя базы данных.", http.StatusBadRequest)
+		return
+	}
 
-    w.WriteHeader(http.StatusOK)
-    LogWebInfo(fmt.Sprintf("База данных '%s' успешно удалена.", dbName))
-    json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("База данных '%s' успешно удалена.", dbName)})
+	if err := deleteDatabase(h.DB, dbName); err != nil {
+		LogWebError(fmt.Sprintf("Не удалось удалить базу данных %s: %v", dbName, err))
+		http.Error(w, fmt.Sprintf("Ошибка удаления базы данных: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	LogWebInfo(fmt.Sprintf("База данных '%s' успешно удалена.", dbName))
+	json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("База данных '%s' успешно удалена.", dbName)})
 }
 
-
 // API для получения списка бэкапов (директорий)
-func handleGetBackups(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
-    
-    // Проверка точки монтирования SMB-шары
-    mountPoint := appConfig.SMBShare.LocalMountPoint
-    if _, err := os.Stat(mountPoint); os.IsNotExist(err) {
-        // Если точка монтирования не существует, пытаемся ее создать и смонтировать
-        LogInfo(fmt.Sprintf("Точка монтирования %s не существует или недоступна. Попытка монтирования...", mountPoint))
-        
-        // Попытка монтирования (требует прав sudo или настройки /etc/fstab)
-        // В реальном приложении это может быть сложной операцией без root-прав. 
-        // Здесь имитируем вызов mount с настройками из конфига.
-        // Предполагается, что 'mount.cifs' доступен и настроен для работы без интерактивного ввода.
-        cmd := exec.Command("sudo", "mount", "-t", "cifs", appConfig.SMBShare.RemotePath, mountPoint, 
-                            "-o", fmt.Sprintf("credentials=/etc/smb-creds,domain=%s,uid=%d,gid=%d,rw", appConfig.SMBShare.Domain, os.Getuid(), os.Getgid())) 
+func (h *AppHandlers) handleGetBackups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
 
-        output, mountErr := cmd.CombinedOutput()
-        if mountErr != nil {
-            errMsg := fmt.Sprintf("Ошибка монтирования SMB-шары (%s): %v, Вывод: %s", mountPoint, mountErr, string(output))
-            LogWebError(errMsg)
-            // Возвращаем пустой список и ошибку
-            http.Error(w, "Ошибка монтирования SMB-шары: " + errMsg, http.StatusInternalServerError)
-            return
-        }
-        LogWebInfo(fmt.Sprintf("SMB-шара успешно смонтирована в %s.", mountPoint))
-    }
+	mountPoint := appConfig.SMBShare.LocalMountPoint
+	// Проверка существования точки монтирования без попытки монтирования
+	if _, err := os.Stat(mountPoint); os.IsNotExist(err) {
+		LogWebError(fmt.Sprintf("Точка монтирования SMB-шары %s не существует или недоступна. Убедитесь, что она смонтирована через systemd.", mountPoint))
+		http.Error(w, "Точка монтирования SMB-шары недоступна. Убедитесь, что она смонтирована.", http.StatusInternalServerError)
+		return
+	}
 
-    // Получаем список директорий (базовых имен бэкапов)
-    baseNames, err := getBackupBaseNames(mountPoint, appConfig.App.BackupBlacklist)
-    if err != nil {
-        LogWebError(fmt.Sprintf("Не удалось получить список бэкапов: %v", err))
-        http.Error(w, "Ошибка сервера при получении списка бэкапов", http.StatusInternalServerError)
-        return
-    }
+	// Получаем список директорий (базовых имен бэкапов)
+	baseNames, err := getBackupBaseNames(mountPoint, appConfig.App.BackupBlacklist)
+	if err != nil {
+		LogWebError(fmt.Sprintf("Не удалось получить список бэкапов: %v", err))
+		http.Error(w, "Ошибка сервера при получении списка бэкапов", http.StatusInternalServerError)
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(baseNames)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(baseNames)
 }
 
 // API для запуска восстановления базы данных (handleStartRestore)
-func handleStartRestore(w http.ResponseWriter, r *http.Request) { 
-    if r.Method != http.MethodPost {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
+func (h *AppHandlers) handleStartRestore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
 
-    var req RestoreRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "Неверный формат запроса: "+err.Error(), http.StatusBadRequest)
-        return
-    }
+	var req RestoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Неверный формат запроса: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    if req.BackupBaseName == "" || req.NewDBName == "" {
-        http.Error(w, "Не указано имя бэкапа или имя восстанавливаемой базы.", http.StatusBadRequest)
-        return
-    }
+	if req.BackupBaseName == "" || req.NewDBName == "" {
+		http.Error(w, "Не указано имя бэкапа или имя восстанавливаемой базы.", http.StatusBadRequest)
+		return
+	}
+	// Валидация имен
+	if !isValidDBName(req.NewDBName) {
+		LogWebError(fmt.Sprintf("Недопустимое имя новой базы данных: %s", req.NewDBName))
+		http.Error(w, "Недопустимое имя новой базы данных.", http.StatusBadRequest)
+		return
+	}
+	if !isValidBackupBaseName(req.BackupBaseName) {
+		LogWebError(fmt.Sprintf("Недопустимое имя базового бэкапа: %s", req.BackupBaseName))
+		http.Error(w, "Недопустимое имя базового бэкапа.", http.StatusBadRequest)
+		return
+	}
 
-    // Парсинг RestoreDateTime
-    var restoreTime *time.Time
+	var restoreTime *time.Time
 	if req.RestoreDateTime != "" {
-		// ИСПРАВЛЕНИЕ: Новый формат парсинга, который ожидаем с фронтенда: YYYY-MM-DD HH:MM:SS
-        // Используем 2006-01-02 15:04:05, чтобы избежать ошибки
 		t, err := time.Parse("2006-01-02 15:04:05", req.RestoreDateTime)
 		if err != nil {
-			// Логируем ошибку парсинга времени
 			LogWebError(fmt.Sprintf("Ошибка парсинга времени восстановления %s: %v", req.RestoreDateTime, err))
 			http.Error(w, fmt.Sprintf("Неверный формат даты/времени. Ожидается: YYYY-MM-DD HH:MM:SS. Ошибка: %v", err), http.StatusBadRequest)
 			return
@@ -206,129 +207,188 @@ func handleStartRestore(w http.ResponseWriter, r *http.Request) {
 		restoreTime = &t
 	}
 
-    // Вызываем обновленную функцию
-    if err := startRestore(req.BackupBaseName, req.NewDBName, restoreTime); err != nil {
-        LogWebError(fmt.Sprintf("Не удалось начать восстановление базы данных %s: %v", req.NewDBName, err))
-        http.Error(w, fmt.Sprintf("Ошибка запуска восстановления: %v", err), http.StatusInternalServerError)
-        return
-    }
+	if err := startRestore(h.DB, req.BackupBaseName, req.NewDBName, restoreTime); err != nil {
+		LogWebError(fmt.Sprintf("Не удалось начать восстановление базы данных %s: %v", req.NewDBName, err))
+		http.Error(w, fmt.Sprintf("Ошибка запуска восстановления: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-    w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Восстановление базы данных '%s' из бэкапа '%s' запущено.", req.NewDBName, req.BackupBaseName)})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Восстановление базы данных '%s' из бэкапа '%s' запущено.", req.NewDBName, req.BackupBaseName)})
 }
 
 // API для запуска создания бэкапа базы данных
-func handleStartBackup(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
+func (h *AppHandlers) handleStartBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
 
-    var req BackupRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "Неверный формат запроса: "+err.Error(), http.StatusBadRequest)
-        return
-    }
+	var req BackupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Неверный формат запроса: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    if req.DBName == "" {
-        http.Error(w, "Не указано имя базы данных для бэкапа.", http.StatusBadRequest)
-        return
-    }
+	if req.DBName == "" {
+		http.Error(w, "Не указано имя базы данных для бэкапа.", http.StatusBadRequest)
+		return
+	}
+	// Валидация dbName
+	if !isValidDBName(req.DBName) {
+		LogWebError(fmt.Sprintf("Недопустимое имя базы данных для бэкапа: %s", req.DBName))
+		http.Error(w, "Недопустимое имя базы данных для бэкапа.", http.StatusBadRequest)
+		return
+	}
 
-    if err := startBackup(req.DBName); err != nil {
-        LogWebError(fmt.Sprintf("Не удалось начать создание бэкапа базы данных %s: %v", req.DBName, err))
-        http.Error(w, fmt.Sprintf("Ошибка запуска создания бэкапа: %v", err), http.StatusInternalServerError)
-        return
-    }
+	if err := startBackup(h.DB, req.DBName); err != nil {
+		LogWebError(fmt.Sprintf("Не удалось начать создание бэкапа базы данных %s: %v", req.DBName, err))
+		http.Error(w, fmt.Sprintf("Ошибка запуска создания бэкапа: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-    w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Создание бэкапа базы данных '%s' запущено.", req.DBName)})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Создание бэкапа базы данных '%s' запущено.", req.DBName)})
 }
 
 // API для отмены восстановления базы данных (УДАЛЕНИЕ БД)
-func handleCancelRestoreProcess(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost { // Изменен на POST для безопасности
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
-    
-    dbName := r.URL.Query().Get("name")
-    if dbName == "" {
-        http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
-        return
-    }
-    
-    if err := cancelRestoreProcess(dbName); err != nil {
-        LogWebError(fmt.Sprintf("Не удалось отменить восстановление (удалить БД %s): %v", dbName, err))
-        http.Error(w, fmt.Sprintf("Ошибка отмены восстановления: %v", err), http.StatusInternalServerError)
-        return
-    }
+func (h *AppHandlers) handleCancelRestoreProcess(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
 
-    w.WriteHeader(http.StatusOK)
-    LogWebInfo(fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName))
-    json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName)})
+	dbName := r.URL.Query().Get("name")
+	if dbName == "" {
+		http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
+		return
+	}
+	// Валидация dbName
+	if !isValidDBName(dbName) {
+		LogWebError(fmt.Sprintf("Недопустимое имя базы данных для отмены восстановления: %s", dbName))
+		http.Error(w, "Недопустимое имя базы данных.", http.StatusBadRequest)
+		return
+	}
+
+	if err := cancelRestoreProcess(h.DB, dbName); err != nil {
+		LogWebError(fmt.Sprintf("Не удалось отменить восстановление (удалить БД %s): %v", dbName, err))
+		http.Error(w, fmt.Sprintf("Ошибка отмены восстановления: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	LogWebInfo(fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName))
+	json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("Восстановление базы данных '%s' отменено (БД удалена).", dbName)})
 }
-
 
 // API для получения краткого лога
 func handleGetBriefLog(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodGet {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    logMutex.Lock()
-    defer logMutex.Unlock()
-    json.NewEncoder(w).Encode(briefLog)
+	w.Header().Set("Content-Type", "application/json")
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	json.NewEncoder(w).Encode(briefLog)
 }
 
 // API для получения прогресса восстановления конкретной базы данных
-func handleGetRestoreProgress(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
+func (h *AppHandlers) handleGetRestoreProgress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
 
-    dbName := r.URL.Query().Get("name")
-    if dbName == "" {
-        http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
-        return
-    }
+	dbName := r.URL.Query().Get("name")
+	if dbName == "" {
+		http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
+		return
+	}
+	// Валидация dbName
+	if !isValidDBName(dbName) {
+		LogWebError(fmt.Sprintf("Недопустимое имя базы данных для получения прогресса восстановления: %s", dbName))
+		http.Error(w, "Недопустимое имя базы данных.", http.StatusBadRequest)
+		return
+	}
 
-    progress := getRestoreProgress(dbName)
-    if progress == nil {
-        // Если прогресс не найден, возможно, восстановление еще не началось или уже завершено/отменено
-        // Возвращаем пустой прогресс или статус "not_found"
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(&restoreProgress{Status: "not_found"})
-        return
-    }
+	progress := getRestoreProgress(dbName)
+	if progress == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(&restoreProgress{Status: "not_found"})
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(progress)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(progress)
 }
 
 // API для получения прогресса создания бэкапа конкретной базы данных
-func handleGetBackupProgress(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
-        return
-    }
+func (h *AppHandlers) handleGetBackupProgress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
 
-    dbName := r.URL.Query().Get("name")
-    if dbName == "" {
-        http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
-        return
-    }
+	dbName := r.URL.Query().Get("name")
+	if dbName == "" {
+		http.Error(w, "Имя базы данных не указано.", http.StatusBadRequest)
+		return
+	}
+	// Валидация dbName
+	if !isValidDBName(dbName) {
+		LogWebError(fmt.Sprintf("Недопустимое имя базы данных для получения прогресса бэкапа: %s", dbName))
+		http.Error(w, "Недопустимое имя базы данных.", http.StatusBadRequest)
+		return
+	}
 
-    progress := getBackupProgress(dbName)
-    if progress == nil {
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(&backupProgress{Status: "not_found"})
-        return
-    }
+	progress := getBackupProgress(h.DB, dbName)
+	if progress == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(&backupProgress{Status: "not_found"})
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(progress)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(progress)
+}
+
+// isValidDBName - Простая валидация имени базы данных
+func isValidDBName(name string) bool {
+	// Имя базы данных должно состоять из букв, цифр, подчеркиваний и дефисов.
+	// Длина от 1 до 128 символов (стандартное ограничение SQL Server).
+	// Не должно начинаться с цифры или дефиса.
+	// Более строгая валидация может включать проверку на зарезервированные слова SQL.
+	if len(name) == 0 || len(name) > 128 {
+		return false
+	}
+	// Проверка на первый символ
+	firstChar := rune(name[0])
+	if !((firstChar >= 'a' && firstChar <= 'z') || (firstChar >= 'A' && firstChar <= 'Z') || firstChar == '_') {
+		return false
+	}
+	// Проверка остальных символов
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// isValidBackupBaseName - Простая валидация имени базового бэкапа (имени директории)
+func isValidBackupBaseName(name string) bool {
+	// Имя директории бэкапа должно быть безопасным для файловой системы и не содержать спецсимволов.
+	// Для простоты, ограничимся буквенно-цифровыми символами, подчеркиваниями и дефисами.
+	// Длина от 1 до 255 символов (стандартное ограничение для имен файлов/директорий).
+	if len(name) == 0 || len(name) > 255 {
+		return false
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }

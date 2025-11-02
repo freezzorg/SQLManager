@@ -28,20 +28,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Утилиты ---
 
-    const formatLogTime = (date) => {
+    // --- Утилиты ---
+
+    // Универсальная функция форматирования даты/времени
+    const formatDateTime = (date, type = 'input') => {
         const d = String(date.getDate()).padStart(2, '0');
         const m = String(date.getMonth() + 1).padStart(2, '0');
         const y = date.getFullYear();
         const h = String(date.getHours()).padStart(2, '0');
         const min = String(date.getMinutes()).padStart(2, '0');
         const s = String(date.getSeconds()).padStart(2, '0');
-        return `${d}.${m}.${y} ${h}:${min}:${s}`;
+
+        if (type === 'input') {
+            return `${y}-${m}-${d}T${h}:${min}:${s}`;
+        } else if (type === 'backend') {
+            return `${y}-${m}-${d} ${h}:${min}:${s}`;
+        } else if (type === 'log') {
+            return `${d}.${m}.${y} ${h}:${min}:${s}`;
+        }
+        return '';
     };
 
     const addLogEntry = (message) => {
         console.log(message);
         const li = document.createElement('li');
-        const time = formatLogTime(new Date());
+        const time = formatDateTime(new Date(), 'log');
         li.textContent = `${time} ${message}`;
         briefLog.prepend(li);
         while (briefLog.children.length > 100) {
@@ -58,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
             briefLog.innerHTML = '';
             logEntries.reverse().forEach(entry => {
                 const li = document.createElement('li');
-                const time = formatLogTime(new Date(entry.timestamp));
+                const time = formatDateTime(new Date(entry.timestamp), 'log');
                 li.textContent = `${time} ${entry.message}`;
                 briefLog.appendChild(li);
             });
@@ -67,30 +78,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // setRestoreButtonsState больше не нужна в таком виде, логика кнопок будет управляться через состояние БД
-    // и наличие активных процессов восстановления.
-    // Кнопка отмены восстановления будет привязана к конкретной БД.
-    // setRestoreButtonsState будет удалена.
+    // Вспомогательные функции для создания/обновления прогресс-контейнеров
+    const createRestoreProgressContainer = (dbName) => {
+        const container = document.createElement('div');
+        container.className = 'restore-progress-container';
+        container.innerHTML = `
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: 0%;"></div>
+            </div>
+            <span class="progress-text">0%</span>
+            <button class="cancel-restore-btn-inline" data-dbname="${dbName}" aria-label="Отменить восстановление ${dbName}">Отменить</button>
+        `;
+        container.querySelector('.cancel-restore-btn-inline').addEventListener('click', (event) => {
+            event.stopPropagation();
+            cancelRestore(dbName);
+        });
+        return container;
+    };
 
-    function formatDateToInput(date) {
-        const y = date.getFullYear();
-        const m = String(date.getMonth() + 1).padStart(2, '0');
-        const d = String(date.getDate()).padStart(2, '0');
-        const h = String(date.getHours()).padStart(2, '0');
-        const min = String(date.getMinutes()).padStart(2, '0');
-        const s = String(date.getSeconds()).padStart(2, '0');
-        return `${y}-${m}-${d}T${h}:${min}:${s}`;
-    }
-
-    function formatDateToBackend(date) {
-        const y = date.getFullYear();
-        const m = String(date.getMonth() + 1).padStart(2, '0');
-        const d = String(date.getDate()).padStart(2, '0');
-        const h = String(date.getHours()).padStart(2, '0');
-        const min = String(date.getMinutes()).padStart(2, '0');
-        const s = String(date.getSeconds()).padStart(2, '0');
-        return `${y}-${m}-${d} ${h}:${min}:${s}`;
-    }
+    const createBackupProgressContainer = (dbName) => {
+        const container = document.createElement('div');
+        container.className = 'backup-progress-container';
+        container.innerHTML = `
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: 0%;"></div>
+            </div>
+            <span class="progress-text">0%</span>
+        `;
+        return container;
+    };
 
     // --- API Функции ---
 
@@ -105,17 +121,21 @@ document.addEventListener('DOMContentLoaded', () => {
             databaseList.innerHTML = '';
 
             const restoringDbs = [];
-            const backingUpDbs = []; // Для отслеживания баз в процессе бэкапа
+            const backingUpDbs = [];
 
             databases.forEach(db => {
                 const li = document.createElement('li');
                 li.dataset.dbname = db.name;
+                li.setAttribute('role', 'option');
+                li.setAttribute('tabindex', '0'); // Делаем элемент фокусируемым
                 li.addEventListener('click', () => {
                     selectedDatabase = db.name;
                     document.querySelectorAll('.db-item').forEach(item => {
                         item.classList.remove('selected');
+                        item.removeAttribute('aria-selected');
                     });
                     li.classList.add('selected');
+                    li.setAttribute('aria-selected', 'true');
                 });
                 li.addEventListener('dblclick', () => {
                     newDbNameInput.value = db.name;
@@ -142,8 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         iconClass = 'fas fa-sync-alt fa-spin restoring';
                         restoringDbs.push(db.name);
                         break;
-                    case 'backing_up': // Новый статус для бэкапа
-                        iconClass = 'fas fa-save fa-spin backing-up'; // Иконка для бэкапа
+                    case 'backing_up':
+                        iconClass = 'fas fa-save fa-spin backing-up';
                         backingUpDbs.push(db.name);
                         break;
                     case 'offline':
@@ -157,24 +177,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 statusIconSpan.innerHTML = `<i class="${iconClass}"></i>`;
 
-                // Прогресс-бар для восстановления
                 let restoreProgressContainer = li.querySelector('.restore-progress-container');
                 if (db.state === 'restoring') {
                     if (!restoreProgressContainer) {
-                        restoreProgressContainer = document.createElement('div');
-                        restoreProgressContainer.className = 'restore-progress-container';
-                        restoreProgressContainer.innerHTML = `
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 0%;"></div>
-                            </div>
-                            <span class="progress-text">0%</span>
-                            <button class="cancel-restore-btn-inline" data-dbname="${db.name}">Отменить</button>
-                        `;
+                        restoreProgressContainer = createRestoreProgressContainer(db.name);
                         li.appendChild(restoreProgressContainer);
-                        restoreProgressContainer.querySelector('.cancel-restore-btn-inline').addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            cancelRestore(db.name);
-                        });
                     }
                     restoreProgressContainer.style.display = 'flex';
                     startRestoreProgressPolling(db.name);
@@ -184,18 +191,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                // Прогресс-бар для бэкапа
                 let backupProgressContainer = li.querySelector('.backup-progress-container');
                 if (db.state === 'backing_up') {
                     if (!backupProgressContainer) {
-                        backupProgressContainer = document.createElement('div');
-                        backupProgressContainer.className = 'backup-progress-container';
-                        backupProgressContainer.innerHTML = `
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 0%;"></div>
-                            </div>
-                            <span class="progress-text">0%</span>
-                        `;
+                        backupProgressContainer = createBackupProgressContainer(db.name);
                         li.appendChild(backupProgressContainer);
                     }
                     backupProgressContainer.style.display = 'flex';
@@ -219,7 +218,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            // Запускаем/останавливаем опрос прогресса для бэкапируемых баз
             Object.keys(activeBackupPollers).forEach(dbName => {
                 if (!backingUpDbs.includes(dbName)) {
                     clearInterval(activeBackupPollers[dbName]);
@@ -247,7 +245,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const backups = await response.json();
 
-            // Очищаем список перед добавлением новых элементов
             backupSelect.innerHTML = '<option value="" disabled selected>Выберите бэкап</option>';
             backups.forEach(backup => {
                 const option = document.createElement('option');
@@ -261,7 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const deleteDatabase = async (dbName) => { // Принимаем dbName как аргумент
+    const deleteDatabase = async (dbName) => {
         if (!dbName) {
             alert('Пожалуйста, выберите базу данных для удаления.');
             return;
@@ -296,11 +293,6 @@ document.addEventListener('DOMContentLoaded', () => {
         let restoreDateTime = restoreDatetimeInput.value.trim();
         let formattedDateTime = "";
 
-        // if (restoreInProgress) { // Удаляем
-        //     addLogEntry("Предупреждение: Процесс восстановления уже запущен.");
-        //     return;
-        // }
-
         if (!backupBaseName || !newDbName) {
             alert('Пожалуйста, выберите директорию бэкапа и введите имя восстанавливаемой базы данных.');
             return;
@@ -312,9 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isNaN(dateObj.getTime())) {
                     throw new Error("Некорректный формат даты/времени");
                 }
-                formattedDateTime = formatDateToBackend(dateObj);
-
-                // addLogEntry(`Восстановление на момент времени (PIRT) будет выполнено до: ${formattedDateTime}`); // Удаляем, так как это будет частью основного сообщения
+                formattedDateTime = formatDateTime(dateObj, 'backend');
 
             } catch (e) {
                 console.error("Ошибка форматирования даты:", e);
@@ -324,17 +314,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         addLogEntry(`Начато восстановление базы '${newDbName}' из бэкапа '${backupBaseName}'${formattedDateTime ? ` на ${formattedDateTime}` : ''}`);
-        // setRestoreButtonsState('in_progress'); // Удаляем, так как состояние будет управляться через fetchDatabases
 
         const requestBody = {
             backupBaseName: backupBaseName,
             newDbName: newDbName,
             restoreDateTime: formattedDateTime,
-            // confirmOverwrite: confirmOverwrite // Этот флаг не используется в бэкенде, удаляем
         };
 
         try {
-            // restoreInProgress = true; // Удаляем
             const response = await fetch('/api/restore', {
                 method: 'POST',
                 headers: {
@@ -344,34 +331,29 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (response.ok) {
-                // addLogEntry(`УСПЕХ: Запрос на восстановление базы '${newDbName}' отправлен. Отслеживайте статус.`); // Удаляем, так как основное сообщение уже есть
-                // Сразу запускаем опрос прогресса для этой базы
                 startRestoreProgressPolling(newDbName);
-                fetchDatabases(); // Обновляем список баз, чтобы увидеть статус "restoring"
+                fetchDatabases();
             } else {
                 const errorText = await response.text();
                 addLogEntry(`ОШИБКА: Не удалось запустить восстановление базы '${newDbName}'. Сервер вернул: ${response.status} - ${errorText}`);
                 console.error('Ошибка восстановления:', errorText);
-                // setRestoreButtonsState('initial'); // Удаляем
-                fetchDatabases(); // Обновляем список баз
+                fetchDatabases();
             }
         } catch (error) {
             addLogEntry(`КРИТИЧЕСКАЯ ОШИБКА: Проблема с сетевым запросом при восстановлении базы '${newDbName}': ${error.message}`);
             console.error('Сетевая ошибка:', error);
-            // setRestoreButtonsState('initial'); // Удаляем
-            fetchDatabases(); // Обновляем список баз
+            fetchDatabases();
         }
     }
 
-    const cancelRestore = async (dbName) => { // Принимаем dbName как аргумент
+    const cancelRestore = async (dbName) => {
         if (!dbName) {
             alert('Невозможно отменить: имя восстанавливаемой базы не определено.');
-            fetchDatabases(); // Обновляем состояние кнопок
+            fetchDatabases();
             return;
         }
 
         if (!confirm(`Восстанавливаемая база станет не рабочей и будет удалена. Хотите отменить восстановление базы данных '${dbName}'?`)) {
-            // addLogEntry('Отказ от отмены. Восстановление продолжается.'); // Удаляем, так как это не критичное сообщение
             return;
         }
 
@@ -389,7 +371,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const result = await response.json();
             addLogEntry(`Отмена восстановления базы '${dbName}' успешно завершена`);
-            // Останавливаем опрос прогресса для этой базы
             if (activeRestorePollers[dbName]) {
                 clearInterval(activeRestorePollers[dbName]);
                 delete activeRestorePollers[dbName];
@@ -399,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Ошибка отмены восстановления:', error);
             addLogEntry(`ОШИБКА: Не удалось отменить восстановление: ${error.message}`);
         } finally {
-            fetchDatabases(); // Обновляем список баз, чтобы отразить изменения
+            fetchDatabases();
         }
     };
 
@@ -441,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     refreshDbBtn.addEventListener('click', fetchDatabases);
     deleteDbBtn.addEventListener('click', () => deleteDatabase(selectedDatabase));
-    backupDbBtn.addEventListener('click', () => { // Обработчик для кнопки "Бэкап"
+    backupDbBtn.addEventListener('click', () => {
         if (selectedDatabase) {
             startBackupProcess(selectedDatabase);
         } else {
@@ -456,14 +437,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setCurrentDatetimeBtn.addEventListener('click', () => {
         const now = new Date();
-        restoreDatetimeInput.value = formatDateToInput(now);
+        restoreDatetimeInput.value = formatDateTime(now, 'input');
         restoreDatetimeInput.focus();
-        // addLogEntry('Установлено текущее время для восстановления.'); // Удаляем
     });
 
     // Обработчик отправки формы
     restoreForm.addEventListener('submit', async (event) => {
-        event.preventDefault(); // Предотвращаем стандартную отправку формы
+        event.preventDefault();
 
         const backupBaseName = backupSelect.value;
         const newDbName = newDbNameInput.value.trim();
@@ -473,21 +453,16 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Проверяем, существует ли база данных на сервере
         try {
             const response = await fetch('/api/databases');
             const databases = await response.json();
             const dbExists = databases.some(db => db.name.toLowerCase() === newDbName.toLowerCase());
 
             if (dbExists) {
-                // Если существует, переключаемся в режим подтверждения
-                // addLogEntry(`База данных '${newDbName}' существует. Ожидание подтверждения перезаписи.`); // Удаляем
-                // setRestoreButtonsState('confirm'); // Удаляем, управляем видимостью напрямую
                 confirmRestoreButtons.style.display = 'flex';
                 confirmationSection.style.display = 'block';
                 restoreDbBtn.style.display = 'none';
             } else {
-                // Если не существует, запускаем восстановление сразу
                 startRestoreProcess();
                 confirmRestoreButtons.style.display = 'none';
                 confirmationSection.style.display = 'none';
@@ -496,7 +471,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error('Ошибка при проверке существования БД перед восстановлением:', error);
             addLogEntry(`ОШИБКА: Не удалось проверить существование БД '${newDbName}' перед восстановлением: ${error.message}`);
-            // setRestoreButtonsState('initial'); // Удаляем
             confirmRestoreButtons.style.display = 'none';
             confirmationSection.style.display = 'none';
             restoreDbBtn.style.display = 'block';
@@ -504,14 +478,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     confirmRestoreBtn.addEventListener('click', () => {
-        startRestoreProcess(); // Запускаем без флага confirmOverwrite, так как бэкенд его не использует
+        startRestoreProcess();
         confirmRestoreButtons.style.display = 'none';
         confirmationSection.style.display = 'none';
         restoreDbBtn.style.display = 'block';
     });
     cancelConfirmRestoreBtn.addEventListener('click', () => {
-        // addLogEntry('Восстановление отменено пользователем (на этапе подтверждения).'); // Удаляем
-        // setRestoreButtonsState('initial'); // Удаляем
         confirmRestoreButtons.style.display = 'none';
         confirmationSection.style.display = 'none';
         restoreDbBtn.style.display = 'block';
@@ -529,9 +501,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const startRestoreProgressPolling = (dbName) => {
         if (activeRestorePollers[dbName]) {
-            return; // Опрос уже запущен
+            return;
         }
-        // addLogEntry(`Запущен опрос прогресса для базы '${dbName}'.`); // Удаляем
         activeRestorePollers[dbName] = setInterval(() => fetchRestoreProgress(dbName), restoreProgressPollingInterval);
     };
 
@@ -563,18 +534,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     clearInterval(activeRestorePollers[dbName]);
                     delete activeRestorePollers[dbName];
                 }
-                fetchDatabases(); // Обновляем список баз, чтобы убрать прогресс-бар и обновить статус
+                fetchDatabases();
             }
 
         } catch (error) {
             console.error(`Ошибка получения прогресса для ${dbName}:`, error);
             addLogEntry(`ОШИБКА: Не удалось получить прогресс для базы '${dbName}': ${error.message}`);
-            // Если ошибка, останавливаем опрос, чтобы не спамить запросами
             if (activeRestorePollers[dbName]) {
                 clearInterval(activeRestorePollers[dbName]);
                 delete activeRestorePollers[dbName];
             }
-            fetchDatabases(); // Обновляем список баз
+            fetchDatabases();
         }
     };
 
@@ -588,13 +558,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const progressText = li.querySelector('.progress-text');
 
         if (progress.status === 'in_progress' || progress.status === 'pending') {
-            progressContainer.style.display = 'flex'; // Показываем прогресс-бар
+            progressContainer.style.display = 'flex';
             progressBarFill.style.width = `${progress.percentage}%`;
-            progressText.textContent = `${progress.percentage}%`; // Удалено отображение имени файла
+            progressText.textContent = `${progress.percentage}%`;
             statusIconSpan.innerHTML = `<i class="fas fa-sync-alt fa-spin restoring" title="Восстанавливается"></i>`;
             statusIconSpan.title = "restoring";
         } else {
-            progressContainer.style.display = 'none'; // Скрываем прогресс-бар
+            progressContainer.style.display = 'none';
             let iconClass = '';
             let title = '';
             switch (progress.status) {
@@ -607,12 +577,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     title = 'Ошибка восстановления';
                     break;
                 case 'cancelled':
-                    iconClass = 'fas fa-times-circle offline'; // Или другой значок для отмены
+                    iconClass = 'fas fa-times-circle offline';
                     title = 'Восстановление отменено';
                     break;
-                case 'not_found': // Если прогресс не найден, значит, база не восстанавливается
-                    // Оставляем текущий статус, который пришел из fetchDatabases
-                    return; 
+                case 'not_found':
+                    return;
                 default:
                     iconClass = 'fas fa-question-circle unknown';
                     title = 'Неизвестный статус';
@@ -626,7 +595,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const startBackupProgressPolling = (dbName) => {
         if (activeBackupPollers[dbName]) {
-            return; // Опрос уже запущен
+            return;
         }
         activeBackupPollers[dbName] = setInterval(() => fetchBackupProgress(dbName), restoreProgressPollingInterval);
     };
@@ -716,6 +685,4 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchDatabases();
     fetchBackups();
     fetchBriefLog();
-    setInterval(fetchDatabases, 10000); // Обновляем список баз каждые 10 секунд
-    setInterval(fetchBriefLog, 5000); // Обновляем лог каждые 5 секунд
 });

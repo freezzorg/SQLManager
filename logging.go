@@ -74,16 +74,21 @@ func LogError(message string) {
     fileLogger.Printf("[ERROR] %s", message)
 }
 
+// RecordWebLog - Запись сообщения в краткий лог для веб-интерфейса
+func RecordWebLog(message string) {
+    recordBriefLog(message)
+}
+
 // Функция логирования INFO для веб-интерфейса (и в файл)
 func LogWebInfo(message string) {
     if currentLogLevel >= 1 {
         fileLogger.Printf("[INFO] %s", message)
-        recordBriefLog(message) // Запись в краткий лог для веб-интерфейса
+        RecordWebLog(message) // Запись в краткий лог для веб-интерфейса
     }
 }
 
 // Функция логирования ERROR для веб-интерфейса (и в файл)
 func LogWebError(message string) {
     fileLogger.Printf("[ERROR] %s", message)
-    recordBriefLog("ОШИБКА: " + message) // Запись в краткий лог для веб-интерфейса
+    RecordWebLog("ОШИБКА: " + message) // Запись в краткий лог для веб-интерфейса
 }

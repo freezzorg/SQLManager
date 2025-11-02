@@ -2,9 +2,9 @@ body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: 
 #container { display: flex; flex-direction: column; width: 100%; margin: 0 auto; height: 100vh; } /* Ширина 100%, высота 100vh */
 #main { display: flex; flex: 1; }
 #left-frame, #right-frame { border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; }
-#left-frame { width: 420px; flex-shrink: 0; height: calc(40vh - 10px); display: flex; flex-direction: column; overflow-x: hidden; } /* Фиксированная ширина 420px, не сжимается */
-#right-frame { width: calc(100% - 420px); flex-grow: 1; height: calc(40vh - 10px); display: flex; flex-direction: column; } /* Занимает оставшееся пространство */
-#bottom-frame { height: calc(60vh - 10px); border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; overflow-y: auto; } /* Высота 60vh */
+#left-frame { width: 450px; flex-shrink: 0; height: calc(45vh - 10px); display: flex; flex-direction: column; overflow-x: hidden; } /* Увеличена ширина и высота */
+#right-frame { width: calc(100% - 450px); flex-grow: 1; height: calc(45vh - 10px); display: flex; flex-direction: column; } /* Увеличена высота, ширина подстраивается */
+#bottom-frame { height: calc(55vh - 10px); border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; overflow-y: auto; } /* Уменьшена высота */
 h2 { margin: 0 0 20px 0; font-weight: bold; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
 ul { list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
 li { 
@@ -93,12 +93,16 @@ li.selected { background-color: #d1e7ff; }
     background-color: #da190b;
 }
 
+/* Общие классы для кнопок */
+.button-fixed-width-100 { width: 100px; }
+.button-half-width { width: calc(50% - 2.5px); }
+
 button { padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; height: 30px; box-sizing: border-box; }
 .refresh-btn { background-color: #2196F3; color: white; }
-.refresh-btn.left { width: calc(50% - 2.5px); } /* Изменено для одинаковой ширины */
+.refresh-btn.left { width: calc(50% - 2.5px); }
 .refresh-btn.right { width: 100px; }
 .refresh-btn:hover { background-color: #1976D2; }
-.delete-btn { background-color: #f44336; color: white; width: calc(50% - 2.5px); } /* Изменено для одинаковой ширины */
+.delete-btn { background-color: #f44336; color: white; width: calc(50% - 2.5px); }
 .delete-btn:hover { background-color: #da190b; }
 .backup-btn { background-color: #FFC107; color: black; width: calc(50% - 2.5px); } /* Желтая кнопка "Бэкап" */
 .backup-btn:hover { background-color: #FFB300; }
@@ -109,12 +113,14 @@ button { padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; h
 .now-btn:hover { background-color: #F57C00; }
 .submit-btn { background-color: #4CAF50; color: white; width: 100%; }
 .submit-btn:hover { background-color: #45a049; }
-.confirm-btn { background-color: #4CAF50; color: white; width: calc(50% - 2.5px); margin-right: 5px; }
+.confirm-btn { background-color: #4CAF50; color: white; flex: 1; margin-right: 5px; }
 .confirm-btn:hover { background-color: #45a049; }
-.cancel-btn { background-color: #f44336; color: white; width: calc(50% - 2.5px); }
+.cancel-btn { background-color: #f44336; color: white; flex: 1; }
 .cancel-btn:hover { background-color: #da190b; }
 .cancel-restore-btn { background-color: #f44336; color: white; width: 100%; }
 .cancel-restore-btn:hover { background-color: #da190b; }
+.button-fixed-width-100 { width: 100px; }
+.button-half-width { width: calc(50% - 2.5px); }
 #restore-form { width: 100%; flex: 1; display: flex; flex-direction: column; }
 .form-group { width: 100%; display: flex; flex-direction: column; margin-bottom: 10px; }
 label { font-weight: normal; margin-bottom: 5px; }

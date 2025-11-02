@@ -14,7 +14,6 @@ import (
 )
 
 var appConfig Config
-var dbConn *sql.DB
 var logMutex sync.Mutex // Мьютекс для безопасной записи в лог-файл (используется в logging.go)
 var briefLog []LogEntry // Краткий лог для веб-интерфейса (используется в logging.go)
 
@@ -29,17 +28,17 @@ func main() {
     setupLogger(appConfig.App.LogFile, appConfig.App.LogLevel)
     
     // 3. Установка подключения к MSSQL
-    var err error
-    dbConn, err = setupDBConnection(appConfig.MSSQL)
+    db, err := setupDBConnection(appConfig.MSSQL)
     if err != nil {
         // Мы используем LogError, который пишет и в файл, и в консоль
         LogError(fmt.Sprintf("Ошибка подключения к SQL Server (%s): %v", appConfig.MSSQL.Server, err))
         return
     }
     LogInfo("Успешное подключение к SQL Server.")
+    defer db.Close() // Закрываем соединение при завершении работы приложения
 
     // 4. Запуск веб-сервера
-    startWebServer(appConfig.App.BindAddress)
+    startWebServer(db, appConfig.App.BindAddress)
 }
 
 // Загружает конфигурацию из файла
@@ -74,26 +73,24 @@ func setupDBConnection(cfg struct {
 }
 
 // Запускает веб-сервер
-func startWebServer(addr string) {
+func startWebServer(db *sql.DB, addr string) {
     // Настройка маршрутов
     // Обслуживание статических файлов из директории "static"
     http.Handle("/", http.FileServer(http.Dir("./static")))
     
+    // Создаем экземпляр AppHandlers
+    handlers := &AppHandlers{DB: db}
+
     // API маршруты:
-    http.HandleFunc("/api/databases", authMiddleware(handleGetDatabases))
-    http.HandleFunc("/api/delete", authMiddleware(handleDeleteDatabase)) 
-    http.HandleFunc("/api/backups", authMiddleware(handleGetBackups))
-    // ИСПРАВЛЕНО: Обновленный маршрут для запуска восстановления
-    http.HandleFunc("/api/restore", authMiddleware(handleStartRestore)) 
-    http.HandleFunc("/api/log", authMiddleware(handleGetBriefLog))
-    // ИСПРАВЛЕНО: Обновленный маршрут для отмены восстановления
-    http.HandleFunc("/api/cancel-restore", authMiddleware(handleCancelRestoreProcess)) 
-    // Новый маршрут для получения прогресса восстановления
-    http.HandleFunc("/api/restore-progress", authMiddleware(handleGetRestoreProgress))
-    // Новый маршрут для запуска создания бэкапа
-    http.HandleFunc("/api/backup", authMiddleware(handleStartBackup))
-    // Новый маршрут для получения прогресса создания бэкапа
-    http.HandleFunc("/api/backup-progress", authMiddleware(handleGetBackupProgress))
+    http.HandleFunc("/api/databases", authMiddleware(handlers.handleGetDatabases))
+    http.HandleFunc("/api/delete", authMiddleware(handlers.handleDeleteDatabase)) 
+    http.HandleFunc("/api/backups", authMiddleware(handlers.handleGetBackups))
+    http.HandleFunc("/api/restore", authMiddleware(handlers.handleStartRestore)) 
+    http.HandleFunc("/api/log", authMiddleware(handleGetBriefLog)) // handleGetBriefLog не является методом AppHandlers
+    http.HandleFunc("/api/cancel-restore", authMiddleware(handlers.handleCancelRestoreProcess)) 
+    http.HandleFunc("/api/restore-progress", authMiddleware(handlers.handleGetRestoreProgress))
+    http.HandleFunc("/api/backup", authMiddleware(handlers.handleStartBackup))
+    http.HandleFunc("/api/backup-progress", authMiddleware(handlers.handleGetBackupProgress))
 
     LogInfo(fmt.Sprintf("Веб-сервер запущен на %s", addr))
     // Запускаем веб-сервер
