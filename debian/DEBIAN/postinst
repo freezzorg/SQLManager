@@ -35,17 +35,6 @@ if [ -f /var/log/sqlmanager/sqlmanager.log ]; then
 fi
 chmod 750 /var/log/sqlmanager
 
-# Копируем файлы сервисов, если не существуют
-if [ ! -f /etc/systemd/system/mnt-sql_backups.mount ]; then
-    cp /opt/SQLManager/mnt-sql_backups.mount /etc/systemd/system/
-    systemctl enable mnt-sql_backups.mount || true
-fi
-
-if [ ! -f /etc/systemd/system/sqlmanager.service ]; then
-    cp /opt/SQLManager/sqlmanager.service /etc/systemd/system/
-    systemctl enable sqlmanager.service || true
-fi
-
 # Перезагружаем systemd
 systemctl daemon-reload || true
 
@@ -55,4 +44,6 @@ systemctl start mnt-sql_backups.mount || true
 systemctl enable sqlmanager.service || true
 systemctl start sqlmanager.service || true
 
+echo
 echo "SQLManager установлен. Пожалуйста, настройте /opt/SQLManager/config.yaml и /etc/smbcredentials/.veeamsrv_creds перед использованием."
+echo "После настройки запустите приложение командой: sudo systemctl start sqlmanager.service или перезагрузите сервер."

@@ -26,20 +26,22 @@ mkdir -p debian/usr/bin
 mkdir -p debian/etc/systemd/system
 mkdir -p debian/var/log/sqlmanager
 mkdir -p debian/etc/smbcredentials
+mkdir -p debian/etc/logrotate.d
 
 # Копируем файлы приложения
 cp -r static debian/opt/SQLManager/
 cp config.yaml debian/opt/SQLManager/ 2>/dev/null || true
-cp mnt-sql_backups.mount debian/opt/SQLManager/
-cp sqlmanager.service debian/opt/SQLManager/
+
+# Копируем файл ротации лога
+cp sources/sqlmanager debian/etc/logrotate.d/
+
+# Копируем файлы сервисов systemd
+cp sources/mnt-sql_backups.mount debian/etc/systemd/system/
+cp sources/sqlmanager.service debian/etc/systemd/system/
 
 # Собираем приложение (создаем статическую сборку для совместимости)
 echo "Собираем приложение..."
 CGO_ENABLED=0 go build -ldflags="-s -w -extldflags=-static" -a -tags netgo -o debian/opt/SQLManager/sqlmanager .
-
-# Копируем исполняемый файл в /usr/bin (создаем символическую ссылку или копируем)
-# ln -s /opt/SQLManager/sqlmanager debian/usr/bin/sqlmanager
-
 
 # Создаем скрипт запуска
 cat > debian/opt/SQLManager/start.sh << 'EOF'
@@ -92,17 +94,6 @@ if [ -f /var/log/sqlmanager/sqlmanager.log ]; then
 fi
 chmod 750 /var/log/sqlmanager
 
-# Копируем файлы сервисов, если не существуют
-if [ ! -f /etc/systemd/system/mnt-sql_backups.mount ]; then
-    cp /opt/SQLManager/mnt-sql_backups.mount /etc/systemd/system/
-    systemctl enable mnt-sql_backups.mount || true
-fi
-
-if [ ! -f /etc/systemd/system/sqlmanager.service ]; then
-    cp /opt/SQLManager/sqlmanager.service /etc/systemd/system/
-    systemctl enable sqlmanager.service || true
-fi
-
 # Перезагружаем systemd
 systemctl daemon-reload || true
 
@@ -112,7 +103,9 @@ systemctl start mnt-sql_backups.mount || true
 systemctl enable sqlmanager.service || true
 systemctl start sqlmanager.service || true
 
+echo
 echo "SQLManager установлен. Пожалуйста, настройте /opt/SQLManager/config.yaml и /etc/smbcredentials/.veeamsrv_creds перед использованием."
+echo "После настройки запустите приложение командой: sudo systemctl start sqlmanager.service или перезагрузите сервер."
 EOF
 
 # Создаем prerm скрипт (выполняется перед удалением)
@@ -164,6 +157,6 @@ fi
 
 # Создаем пакет
 echo "Создаем deb-пакет..."
-dpkg-deb --build debian sqlmanager-1.0.0-amd64.deb
+dpkg-deb --build debian build/sqlmanager-1.0.0-amd64.deb
 
 echo "Сборка завершена. Пакет: sqlmanager-1.0.0-amd64.deb"
