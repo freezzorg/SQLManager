@@ -5,8 +5,8 @@ Priority: optional
 Architecture: amd64
 Depends: 
 Maintainer: SQLManager Team
+Installed-Size: 7795
 Description: Web application for managing SQL Server databases
  SQLManager is a web application for managing SQL Server databases,
  allowing to perform restore and backup operations through a simple web interface.
  The application provides security features and detailed logging.
-Installed-Size: 7711

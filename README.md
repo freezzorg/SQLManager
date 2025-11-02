@@ -12,7 +12,7 @@ SQLManager - это веб-приложение для управления ба
 ```bash
 git clone https://github.com/freezzorg/SQLManager.git
 mv SQLManager /opt
-sudo chown -R sql:"пользователи домена" /opt/SQLManager
+sudo chown -R mssql:mssql /opt/SQLManager
 sudo chmod -R 750 /opt/SQLManager
 sudo chown -R sql:"пользователи домена" /mnt/sql_backups
 sudo chmod -R 750 /mnt/sql_backups
@@ -37,6 +37,17 @@ Options=vers=3.0,credentials=/etc/smbcredentials/.veeamsrv_creds,uid=mssql,gid=m
 [Install]
 WantedBy=multi-user.target
 ```
+- В файл /etc/smbcredentials/.veeamsrv_creds добавить данные в виде:
+```bash
+username=имя
+pssword=пароль
+domain=ДОМЕН
+```
+- Назначить права доступа:
+```bash
+sudo cmod 640 /etc/smbcredentials/.veeamsrv_creds
+```
+
 - Добавить пользователя sql в группу mssql, что бы приложение могло читать данные их шары:
 ```bash
 sudo usermod -aG mssql sql

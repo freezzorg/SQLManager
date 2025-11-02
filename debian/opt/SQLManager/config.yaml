@@ -1,6 +1,6 @@
 # Настройки подключения к SQL Server
 mssql:
-  server: "USQL2" # Имя сервера SQL
+  server: "USQL2" # Имя тестового сервера 
   port: 1433
   user: "sa" # Имя пользователя SQL
   password: "Jc/x2no@" # Пароль SQL
@@ -9,17 +9,14 @@ mssql:
 
 # Настройки доступа к Windows-шаре (для бэкапов)
 smb_share:
-  remote_path: "//backup-server/backup$/mssql" # Удаленный путь к шаре
+  remote_path: "//veeamsrv.kcep.local/backup$/mssql" # Удаленный путь к шаре
   local_mount_point: "/mnt/sql_backups" # Локальная точка монтирования
-  domain: "kcep" # Доменная часть логина
-  user: "sql" # Логин для шары
-  password: "sql" # Пароль для шары
 
 # Настройки приложения и безопасности
 app:
-  bind_address: "0.0.0.0:8080"
+  bind_address: "0.0.0.0:8088"
   log_file: "/var/log/sqlmanager/sqlmanager.log" # Путь к файлу логов
-  log_level: "INFO" # Уровень логирования (INFO, ERROR, DEBUG)
+  log_level: "DEBUG" # Уровень логирования (INFO, ERROR, DEBUG)
   backup_blacklist: # Черный список бэкапов
     - "-=NoUsedBaseBackups=-"
     - "-=scripts=-"

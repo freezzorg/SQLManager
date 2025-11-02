@@ -17,7 +17,7 @@ import (
 // Главная функция, запускающая приложение
 func main() {
     // 1. Загрузка конфигурации 
-    appConfig, err := config.LoadConfig("config.yaml")
+    appConfig, err := config.LoadConfig("./config.yaml")
     if err != nil {
         log.Fatalf("Ошибка загрузки конфигурации: %v", err)
     }

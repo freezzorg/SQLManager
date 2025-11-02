@@ -19,9 +19,6 @@ type Config struct {
     SMBShare struct {
         RemotePath      string `yaml:"remote_path"`
         LocalMountPoint string `yaml:"local_mount_point"` // /mnt/sql_backups
-        Domain          string `yaml:"domain"`
-        User            string `yaml:"user"`
-        Password        string `yaml:"password"`
     } `yaml:"smb_share"`
     App struct {
         BindAddress string   `yaml:"bind_address"`

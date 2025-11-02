@@ -2,24 +2,21 @@
 mssql:
   server: "USQL2" # Имя тестового сервера 
   port: 1433
-  user: "sa" # Имя пользователя SQL [cite: 5]
-  password: "Jc/x2no@" # Пароль SQL [cite: 5]
+  user: "sa" # Имя пользователя SQL
+  password: "Jc/x2no@" # Пароль SQL
   # Путь для перемещения файлов данных/логов при восстановлении
   restore_path: "/var/opt/mssql/data" # Указанный каталог
 
 # Настройки доступа к Windows-шаре (для бэкапов)
 smb_share:
-  remote_path: "//veeamsrv.kcep.local/backup$/mssql" # Удаленный путь к шаре [cite: 3]
-  local_mount_point: "/mnt/sql_backups" # Локальная точка монтирования [cite: 11]
-  domain: "kcep" # Доменная часть логина [cite: 5]
-  user: "sql" # Логин для шары [cite: 5]
-  password: "sql" # Пароль для шары [cite: 5]
+  remote_path: "//veeamsrv.kcep.local/backup$/mssql" # Удаленный путь к шаре
+  local_mount_point: "/mnt/sql_backups" # Локальная точка монтирования
 
 # Настройки приложения и безопасности
 app:
-  bind_address: "0.0.0.0:8080"
-  log_file: "/var/log/sqlmanager/sqlmanager.log" # Путь к файлу логов [cite: 15]
-  log_level: "DEBUG" # Уровень логирования (INFO, ERROR, DEBUG) [cite: 17]
+  bind_address: "0.0.0.0:8088"
+  log_file: "/var/log/sqlmanager/sqlmanager.log" # Путь к файлу логов
+  log_level: "DEBUG" # Уровень логирования (INFO, ERROR, DEBUG)
   backup_blacklist: # Черный список бэкапов
     - "-=NoUsedBaseBackups=-"
     - "-=scripts=-"
@@ -49,4 +46,3 @@ whitelist:
   - "10.10.102.122"
   - "10.10.102.184"
   - "10.10.100.56"
-

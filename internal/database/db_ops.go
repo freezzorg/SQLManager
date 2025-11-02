@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -400,7 +401,21 @@ func GetRestoreSequence(db *sql.DB, baseName string, restoreTime *time.Time, smb
 	backupDir := filepath.Join(smbSharePath, baseName)
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка чтения директории бэкапа %s: %w", backupDir, err)
+		// Попытка монтирования шары через systemd при ошибке чтения
+		logging.LogDebug(fmt.Sprintf("Ошибка чтения директории бэкапа %s: %v. Попытка монтирования шары через systemd...", backupDir, err))
+		
+		// Выполняем команду systemctl для монтирования шары через sudo
+		cmd := exec.Command("sudo", "systemctl", "start", "mnt-sql_backups.mount")
+		if output, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
+			logging.LogError(fmt.Sprintf("Ошибка монтирования шары: %v, вывод: %s", cmdErr, string(output)))
+			return nil, fmt.Errorf("ошибка монтирования шары и чтения директории бэкапа %s: %w", backupDir, err)
+		}
+		
+		// Повторная попытка чтения директории после монтирования
+		entries, err = os.ReadDir(backupDir)
+		if err != nil {
+			return nil, fmt.Errorf("ошибка чтения директории бэкапа %s после монтирования шары: %w", backupDir, err)
+	}
 	}
 
 	var allHeaders []BackupFileSequence
