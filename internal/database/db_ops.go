@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/freezzorg/SQLManager/internal/config"
+	"github.com/freezzorg/SQLManager/internal/logging"
 )
 
 // Структура для хранения логических имен файлов бэкапа (для команды MOVE)
@@ -309,7 +310,7 @@ func BuildRestoreChain(baseName string, allHeaders []BackupFileSequence, restore
 	// 3. Ищем самый свежий FULL бэкап, созданный ДО (или в) restoreTime
 	var fullBackup *BackupFileSequence
 	for i := len(filteredBackups) - 1; i >= 0; i-- {
-	file := filteredBackups[i]
+		file := filteredBackups[i]
 		if file.Type == "FULL" {
 			// Если restoreTime не задано, берем самый свежий FULL. 
 			// Если задано, берем самый свежий FULL, который был создан ДО (или в) restoreTime.
@@ -356,10 +357,16 @@ func BuildRestoreChain(baseName string, allHeaders []BackupFileSequence, restore
 		filesToRestore = append(filesToRestore, *diffBackup)
 	}
 
-	// 6. Добавляем LOG бэкапы после последнего добавленного (FULL или DIFF)
+	// Определяем время, после которого должны идти LOG файлы (после FULL или DIFF)
+	lastBackupTime := fullBackup.BackupFinishDate
+	if diffBackup != nil {
+		lastBackupTime = diffBackup.BackupFinishDate
+	}
+
+	// 6. Добавляем LOG бэкапы после последнего добавленного (FULL или DIFF), в хронологическом порядке
 	for _, file := range filteredBackups {
-		if file.Type == "LOG" && file.BackupFinishDate.After(fullBackup.BackupFinishDate) {
-			// Для PIRT: включаем логи, BackupFinishDate которых не превышает restoreTime.
+		if file.Type == "LOG" && file.BackupFinishDate.After(lastBackupTime) {
+			// Если задано время восстановления
 			if restoreTime != nil {
 				// Если текущий лог завершен после желаемого времени восстановления,
 				// то этот лог может содержать нужную точку восстановления.
@@ -368,11 +375,15 @@ func BuildRestoreChain(baseName string, allHeaders []BackupFileSequence, restore
 					filesToRestore = append(filesToRestore, file)
 					break
 				}
+				// В противном случае добавляем LOG, если он до времени восстановления
+				if file.BackupFinishDate.Before(*restoreTime) || file.BackupFinishDate.Equal(*restoreTime) {
+					filesToRestore = append(filesToRestore, file)
+				}
+			} else {
+				// Если время восстановления не задано, добавляем все LOG файлы
+				filesToRestore = append(filesToRestore, file)
 			}
-			
-			// Добавляем LOG.
-			filesToRestore = append(filesToRestore, file)
-		}
+	}
 	}
 	
 	if len(filesToRestore) == 0 {
@@ -446,17 +457,23 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 	go func(ctx context.Context, cancel context.CancelFunc) { // Передаем контекст и функцию отмены
 		defer cancel() // Гарантируем вызов cancel при завершении горутины
 
+	logging.LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
+		if restoreTime != nil {
+			logging.LogDebug(fmt.Sprintf("Желаемое время восстановления (PIRT): %s", restoreTime.Format("2006-01-02 15:04:05")))
+		}
+
 		// Обновляем статус на "in_progress"
-	RestoreProgressesMutex.Lock()
-	progress := RestoreProgresses[newDBName]
+		RestoreProgressesMutex.Lock()
+		progress := RestoreProgresses[newDBName]
 		if progress != nil {
 			progress.Status = "in_progress"
 		}
-	RestoreProgressesMutex.Unlock()
+		RestoreProgressesMutex.Unlock()
 
-	// 1. Получение последовательности бэкапов
-	filesToRestore, err := GetRestoreSequence(db, backupBaseName, restoreTime, smbSharePath)
+		// 1. Получение последовательности бэкапов
+		filesToRestore, err := GetRestoreSequence(db, backupBaseName, restoreTime, smbSharePath)
 		if err != nil {
+			logging.LogError(fmt.Sprintf("Ошибка получения последовательности бэкапов для %s: %v", backupBaseName, err))
 			RestoreProgressesMutex.Lock()
 			if progress != nil {
 				progress.Status = "failed"
@@ -469,7 +486,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 
 		// Обновляем общее количество файлов
 		RestoreProgressesMutex.Lock()
-	if progress != nil {
+		if progress != nil {
 			progress.TotalFiles = len(filesToRestore)
 		}
 		RestoreProgressesMutex.Unlock()
@@ -480,6 +497,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 		// Получаем логические имена файлов из первого файла в цепочке (startFile)
 		logicalFiles, err := GetBackupLogicalFiles(db, startFile.Path)
 		if err != nil {
+			logging.LogError(fmt.Sprintf("Ошибка получения логических имен файлов бэкапа для %s: %v", backupBaseName, err))
 			RestoreProgressesMutex.Lock()
 			if progress != nil {
 				progress.Status = "failed"
@@ -489,6 +507,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			RestoreProgressesMutex.Unlock()
 			return
 		}
+		logging.LogDebug(fmt.Sprintf("Успешно получены логические имена файлов из бэкапа: %+v", logicalFiles))
 
 		// 3. Формируем MOVE-часть команды RESTORE
 		var moveClause string
@@ -521,10 +540,11 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 		moveClause = strings.Join(moveParts, ", ")
 		
 		// 4. Выполнение восстановления
-		for i, file := range filesToRestore {
+	for i, file := range filesToRestore {
 			// Проверяем контекст на отмену перед каждым шагом восстановления
 			select {
 			case <-ctx.Done():
+				logging.LogError(fmt.Sprintf("Восстановление базы '%s' отменено пользователем.", newDBName))
 				RestoreProgressesMutex.Lock()
 				if progress != nil {
 					progress.Status = "cancelled"
@@ -566,9 +586,11 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 				// Для последнего файла всегда используем RECOVERY.
 				// STOPAT не используется, так как точное время восстановления может не совпадать с границей транзакции.
 				recoveryOption = "RECOVERY"
+				logging.LogDebug("Последний файл в цепочке, используется RECOVERY (без STOPAT).")
 			} else {
 				// Не последний бэкап: всегда используем NORECOVERY без STOPAT
 				recoveryOption = "NORECOVERY"
+				logging.LogDebug(fmt.Sprintf("Промежуточный файл в цепочке, используется NORECOVERY (без STOPAT). Тип: %s", file.Type))
 			}
 			
 			// Формирование команды RESTORE
@@ -587,7 +609,10 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 				}
 			}
 			
+			logging.LogDebug(fmt.Sprintf("Выполнение RESTORE (%d/%d): %s", i+1, len(filesToRestore), restoreQuery))
+			
 			if _, err := db.Exec(restoreQuery); err != nil {
+				logging.LogDebug(fmt.Sprintf("Прерывание RESTORE для %s (файл: %s, позиция: %d): %v", newDBName, file.Path, file.Position, err))
 				// Обновляем статус на "failed", удаление БД будет выполнено в cancelRestoreProcess
 				RestoreProgressesMutex.Lock()
 				if progress != nil {
@@ -600,6 +625,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			}
 		}
 		
+		logging.LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
 		RestoreProgressesMutex.Lock()
 		if progress != nil {
 			progress.Status = "completed"
@@ -607,7 +633,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			progress.Percentage = 100
 			progress.EndTime = time.Now()
 		}
-	RestoreProgressesMutex.Unlock()
+		RestoreProgressesMutex.Unlock()
 
 	}(ctx, cancel) // Передаем контекст и функцию отмены в горутину
 
@@ -743,10 +769,11 @@ func CancelRestoreProcess(db *sql.DB, dbName string) error {
 		return fmt.Errorf("восстановление базы '%s' не найдено", dbName)
 	}
 
-	if progress.Status == "failed" || progress.Status == "cancelled" {
+	switch progress.Status {
+	case "failed", "cancelled":
 		delete(RestoreProgresses, dbName)
 		return DeleteDatabase(db, dbName)
-	} else if progress.Status == "completed" {
+	case "completed":
 		// При успешном завершении не удаляем базу, а просто удаляем запись о процессе
 		delete(RestoreProgresses, dbName)
 		return nil
