@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+# Останавливаем и отключаем сервис
+systemctl stop sqlmanager.service || true
+systemctl disable sqlmanager.service || true
+
+exit 0

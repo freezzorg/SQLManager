@@ -1,0 +1,145 @@
+body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f0f0f0; height: 100vh; overflow: hidden; } /* Убраны отступы, скрыт overflow */
+#container { display: flex; flex-direction: column; width: 100%; margin: 0 auto; height: 100vh; } /* Ширина 100%, высота 100vh */
+#main { display: flex; flex: 1; }
+#left-frame, #right-frame { border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; }
+#left-frame { width: 450px; flex-shrink: 0; height: calc(45vh - 10px); display: flex; flex-direction: column; overflow-x: hidden; } /* Увеличена ширина и высота */
+#right-frame { width: calc(100% - 450px); flex-grow: 1; height: calc(45vh - 10px); display: flex; flex-direction: column; } /* Увеличена высота, ширина подстраивается */
+#bottom-frame { height: calc(55vh - 10px); border: 1px solid #ccc; border-radius: 5px; background-color: white; margin: 5px; padding: 10px; overflow-y: auto; } /* Уменьшена высота */
+h2 { margin: 0 0 20px 0; font-weight: bold; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
+ul { list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
+li { 
+    padding: 5px 0; 
+    cursor: pointer; 
+    display: flex; 
+    flex-wrap: wrap; /* Позволяет элементам переноситься на новую строку */
+    align-items: center; 
+    font-size: 14px; 
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+    position: relative; /* Для позиционирования прогресс-бара */
+    padding-right: 10px; /* Отступ справа для иконок/кнопок */
+}
+li:hover { background-color: #f5f5f5; }
+li.selected { background-color: #d1e7ff; }
+
+.db-name {
+    flex-grow: 1; /* Занимает доступное пространство */
+    margin-right: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.db-status-icon {
+    margin-left: 5px;
+    font-size: 1.1em;
+    flex-shrink: 0; /* Не сжимается */
+}
+
+.db-status-icon .online { color: #4CAF50; }
+.db-status-icon .restoring { color: #FF9800; }
+.db-status-icon .offline { color: #f44336; }
+.db-status-icon .error { color: #9E9E9E; }
+.db-status-icon .unknown { color: #2196F3; }
+.db-status-icon .backing-up { color: #FFC107; } /* Цвет для статуса бэкапа */
+
+.restore-progress-container, .backup-progress-container { /* Объединяем стили для прогресс-контейнеров */
+    display: flex;
+    align-items: center;
+    width: 100%; /* Занимает всю ширину под именем БД */
+    margin-top: 5px;
+    padding-left: 10px; /* Отступ для выравнивания */
+    box-sizing: border-box;
+}
+
+.progress-bar {
+    width: calc(100% - 90px); /* Увеличиваем ширину прогресс-бара */
+    height: 10px;
+    background-color: #e0e0e0;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-right: 5px; /* Уменьшаем отступ от текста */
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: #2196F3;
+    width: 0%;
+    transition: width 0.3s ease-in-out;
+}
+
+.progress-text {
+    font-size: 0.8em;
+    color: #555;
+    margin-right: 5px; /* Уменьшаем отступ */
+    min-width: 40px; /* Минимальная ширина для отображения "100%" */
+    white-space: nowrap;
+    overflow: visible; /* Разрешаем выход за пределы, если нужно */
+    text-overflow: clip; /* Отключаем многоточие */
+    flex-shrink: 0; /* Не сжимается */
+}
+
+.cancel-restore-btn-inline {
+    background-color: #f44336;
+    color: white;
+    padding: 3px 8px;
+    font-size: 0.7em;
+    border-radius: 3px;
+    cursor: pointer;
+    flex-shrink: 0;
+    height: auto;
+}
+.cancel-restore-btn-inline:hover {
+    background-color: #da190b;
+}
+
+/* Общие классы для кнопок */
+.button-fixed-width-100 { width: 100px; }
+.button-half-width { width: calc(50% - 2.5px); }
+
+button { padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; height: 30px; box-sizing: border-box; }
+.refresh-btn { background-color: #2196F3; color: white; }
+.refresh-btn.left { width: calc(50% - 2.5px); }
+.refresh-btn.right { width: 100px; }
+.refresh-btn:hover { background-color: #1976D2; }
+.delete-btn { background-color: #f44336; color: white; width: calc(50% - 2.5px); }
+.delete-btn:hover { background-color: #da190b; }
+.backup-btn { background-color: #FFC107; color: black; width: calc(50% - 2.5px); } /* Желтая кнопка "Бэкап" */
+.backup-btn:hover { background-color: #FFB300; }
+.clear-btn { background-color: #f44336; color: white; width: 100px; }
+.clear-btn:hover { background-color: #da190b; }
+.button-group { display: flex; gap: 5px; }
+.now-btn { background-color: #FF9800; color: white; width: 100px; }
+.now-btn:hover { background-color: #F57C00; }
+.submit-btn { background-color: #4CAF50; color: white; width: 100%; }
+.submit-btn:hover { background-color: #45a049; }
+.confirm-btn { background-color: #4CAF50; color: white; flex: 1; margin-right: 5px; }
+.confirm-btn:hover { background-color: #45a049; }
+.cancel-btn { background-color: #f44336; color: white; flex: 1; }
+.cancel-btn:hover { background-color: #da190b; }
+.cancel-restore-btn { background-color: #f44336; color: white; width: 100%; }
+.cancel-restore-btn:hover { background-color: #da190b; }
+.button-fixed-width-100 { width: 100px; }
+.button-half-width { width: calc(50% - 2.5px); }
+#restore-form { width: 100%; flex: 1; display: flex; flex-direction: column; }
+.form-group { width: 100%; display: flex; flex-direction: column; margin-bottom: 10px; }
+label { font-weight: normal; margin-bottom: 5px; }
+select, input[type="text"], input[type="datetime-local"] { width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box; }
+.input-group { display: flex; align-items: center; gap: 10px; width: 100%; }
+.input-group button { margin-left: auto; }
+.input-group input[type="text"] { width: calc(100% - 110px); }
+.input-group select, .input-group input[type="datetime-local"] { width: calc(100% - 110px); }
+#button-container { margin-top: auto; }
+#confirm-buttons { display: flex; gap: 5px; }
+#messages p { margin: 2px 0; line-height: 1.2; }
+.spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 2s linear infinite; display: inline-block; flex-shrink: 0; margin-left: 5px; }
+.header-spinner { margin-left: auto; }
+.confirmation { margin-top: 10px; padding: 10px; border: 1px solid #ffcc00; background-color: #fff3cd; color: #856404; display: flex; align-items: center; gap: 10px; }
+.status-indicator { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 5px; flex-shrink: 0; }
+.status-online { background-color: #4CAF50; }
+.status-offline { background-color: #f44336; }
+.status-restoring { background-color: #FF9800; }
+.status-backing-up { background-color: #FFC107; } /* Цвет для индикатора статуса бэкапа */
+.status-error { background-color: #9E9E9E; }
+.status-unknown { background-color: #2196F3; }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
