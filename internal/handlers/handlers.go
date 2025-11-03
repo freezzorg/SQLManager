@@ -13,6 +13,7 @@ import (
 	"github.com/freezzorg/SQLManager/internal/config"
 	"github.com/freezzorg/SQLManager/internal/database"
 	"github.com/freezzorg/SQLManager/internal/logging"
+	"github.com/freezzorg/SQLManager/internal/utils"
 )
 
 // Структура для запроса на восстановление, согласованная с фронтендом
@@ -149,10 +150,11 @@ func (h *AppHandlers) HandleGetBackups(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mountPoint := h.AppConfig.SMBShare.LocalMountPoint
-	// Проверка существования точки монтирования без попытки монтирования
-	if _, err := os.Stat(mountPoint); os.IsNotExist(err) {
-		logging.LogWebError(fmt.Sprintf("Точка монтирования SMB-шары %s не существует или недоступна. Убедитесь, что она смонтирована через systemd.", mountPoint))
-		http.Error(w, "Точка монтирования SMB-шары недоступна. Убедитесь, что она смонтирована.", http.StatusInternalServerError)
+	
+	// Проверяем и монтируем SMB-шару при необходимости
+	if err := utils.EnsureSMBMounted(mountPoint); err != nil {
+		logging.LogWebError(fmt.Sprintf("Не удалось смонтировать SMB-шару %s: %v", mountPoint, err))
+		http.Error(w, "Точка монтирования SMB-шары недоступна и не удалось смонтировать.", http.StatusInternalServerError)
 		return
 	}
 

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/freezzorg/SQLManager/internal/config"
 	"github.com/freezzorg/SQLManager/internal/logging"
+	"github.com/freezzorg/SQLManager/internal/utils"
 )
 
 // Структура для хранения логических имен файлов бэкапа (для команды MOVE)
@@ -397,25 +397,18 @@ func BuildRestoreChain(baseName string, allHeaders []BackupFileSequence, restore
 // GetRestoreSequence - Определяет последовательность бэкапов для восстановления на указанный момент времени
 // (обертка для чтения файлов и построения цепочки)
 func GetRestoreSequence(db *sql.DB, baseName string, restoreTime *time.Time, smbSharePath string) ([]BackupFileSequence, error) {
-	// 1. Читаем все файлы бэкапов для этой базы
+	// 1. Проверяем и монтируем SMB-шару при необходимости
+	if err := utils.EnsureSMBMounted(smbSharePath); err != nil {
+		return nil, fmt.Errorf("не удалось смонтировать SMB-шару %s: %w", smbSharePath, err)
+	}
+	
+	// Формируем путь к директории бэкапов
 	backupDir := filepath.Join(smbSharePath, baseName)
+	
+	// Читаем все файлы бэкапов для этой базы
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
-		// Попытка монтирования шары через systemd при ошибке чтения
-		logging.LogDebug(fmt.Sprintf("Ошибка чтения директории бэкапа %s: %v. Попытка монтирования шары через systemd...", backupDir, err))
-		
-		// Выполняем команду systemctl для монтирования шары через sudo
-		cmd := exec.Command("sudo", "systemctl", "start", "mnt-sql_backups.mount")
-		if output, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
-			logging.LogError(fmt.Sprintf("Ошибка монтирования шары: %v, вывод: %s", cmdErr, string(output)))
-			return nil, fmt.Errorf("ошибка монтирования шары и чтения директории бэкапа %s: %w", backupDir, err)
-		}
-		
-		// Повторная попытка чтения директории после монтирования
-		entries, err = os.ReadDir(backupDir)
-		if err != nil {
-			return nil, fmt.Errorf("ошибка чтения директории бэкапа %s после монтирования шары: %w", backupDir, err)
-	}
+		return nil, fmt.Errorf("ошибка чтения директории бэкапа %s: %w", backupDir, err)
 	}
 
 	var allHeaders []BackupFileSequence
@@ -667,7 +660,20 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 	logging.LogWebInfo(fmt.Sprintf("Начато создание бэкапа базы '%s'...", dbName))
 
 	go func() {
-		// 1. Проверяем и создаем каталог для бэкапов
+		// 1. Проверяем и монтируем SMB-шару при необходимости
+		if err := utils.EnsureSMBMounted(smbSharePath); err != nil {
+			logging.LogError(fmt.Sprintf("Не удалось смонтировать SMB-шару %s: %v", smbSharePath, err))
+			BackupProgressesMutex.Lock()
+			if progress := BackupProgresses[dbName]; progress != nil {
+				progress.Status = "failed"
+				progress.Error = err.Error()
+				progress.EndTime = time.Now()
+			}
+			BackupProgressesMutex.Unlock()
+			return
+		}
+
+		// 2. Проверяем и создаем каталог для бэкапов
 		backupDir, err := checkAndCreateBackupDir(dbName, smbSharePath)
 		if err != nil {
 			logging.LogError(fmt.Sprintf("Ошибка проверки/создания каталога бэкапов для базы '%s': %v", dbName, err))
@@ -899,7 +905,7 @@ func GetDatabases(db *sql.DB) ([]config.Database, error) {
 	`
 	rows, err := db.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка при запросе списка баз: %w", err)
+	return nil, fmt.Errorf("ошибка при запросе списка баз: %w", err)
 	}
 	defer rows.Close()
 
@@ -912,10 +918,10 @@ func GetDatabases(db *sql.DB) ([]config.Database, error) {
 		}
 		
 		// Преобразуем состояние базы в упрощённый статус
-		switch strings.ToUpper(stateDesc) {
+	switch strings.ToUpper(stateDesc) {
 		case "ONLINE":
 			dbItem.State = "online"
-		case "RESTORING", "RECOVERING": 
+	case "RESTORING", "RECOVERING": 
 			dbItem.State = "restoring"
 		case "OFFLINE":
 			dbItem.State = "offline"
