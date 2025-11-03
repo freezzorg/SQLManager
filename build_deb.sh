@@ -30,7 +30,8 @@ mkdir -p debian/etc/logrotate.d
 
 # Копируем файлы приложения
 cp -r static debian/opt/SQLManager/
-cp config.yaml debian/opt/SQLManager/ 2>/dev/null || true
+# Копируем пример конфигурационного файла
+cp config.yaml debian/opt/SQLManager/config.yaml.example 2>/dev/null || true
 
 # Копируем файл ротации лога
 cp sources/sqlmanager debian/etc/logrotate.d/
@@ -65,14 +66,15 @@ if ! id "mssql" &>/dev/null; then
     useradd -r -s /bin/false mssql
 fi
 
-# Создаем файл в /etc/sudoers.d для выполнения команд монтирования
-echo "mssql ALL=(ALL) NOPASSWD: /bin/systemctl start mnt-sql_backups.mount, /bin/systemctl status mnt-sql_backups.mount" > /etc/sudoers.d/sqlmanager
-chmod 440 /etc/sudoers.d/sqlmanager
-
 # Создаем директории, если не существуют
 mkdir -p /var/log/sqlmanager
 mkdir -p /mnt/sql_backups
 mkdir -p /etc/smbcredentials
+
+# Копируем пример конфигурационного файла, если config.yaml не существует
+if [ ! -f /opt/SQLManager/config.yaml ]; then
+    cp /opt/SQLManager/config.yaml.example /opt/SQLManager/config.yaml
+fi
 
 # Устанавливаем права на директории и файлы
 chown -R mssql:mssql /opt/SQLManager
@@ -86,13 +88,23 @@ find /opt/SQLManager -type f -exec chmod 644 {} \;
 chmod +x /opt/SQLManager/sqlmanager
 
 # Устанавливаем специальные права для конфигурационного файла
-chmod 600 /opt/SQLManager/config.yaml
+if [ -f /opt/SQLManager/config.yaml ]; then
+    chmod 600 /opt/SQLManager/config.yaml
+fi
+# Устанавливаем права для примера конфигурационного файла
+if [ -f /opt/SQLManager/config.yaml.example ]; then
+    chmod 644 /opt/SQLManager/config.yaml.example
+fi
 
 # Устанавливаем права на лог-файл, если он существует
 if [ -f /var/log/sqlmanager/sqlmanager.log ]; then
     chmod 640 /var/log/sqlmanager/sqlmanager.log
 fi
 chmod 750 /var/log/sqlmanager
+
+# Создаем файл в /etc/sudoers.d для выполнения команд монтирования
+echo "mssql ALL=(ALL) NOPASSWD: /bin/systemctl start mnt-sql_backups.mount, /bin/systemctl status mnt-sql_backups.mount" > /etc/sudoers.d/sqlmanager
+chmod 440 /etc/sudoers.d/sqlmanager
 
 # Перезагружаем systemd
 systemctl daemon-reload || true
@@ -157,6 +169,6 @@ fi
 
 # Создаем пакет
 echo "Создаем deb-пакет..."
-dpkg-deb --build debian build/sqlmanager-1.0.0-amd64.deb
+dpkg-deb --build debian build/sqlmanager-1.0.1-amd64.deb
 
-echo "Сборка завершена. Пакет: sqlmanager-1.0.0-amd64.deb"
+echo "Сборка завершена. Пакет: sqlmanager-1.0.1-amd64.deb"

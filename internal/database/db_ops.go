@@ -633,7 +633,25 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			}
 		}
 		
-		logging.LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
+			logging.LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
+		
+		// Переводим базу данных на модель простого восстановления
+		alterRecoveryModelQuery := fmt.Sprintf("ALTER DATABASE [%s] SET RECOVERY SIMPLE", newDBName)
+		if _, err := db.Exec(alterRecoveryModelQuery); err != nil {
+			logging.LogError(fmt.Sprintf("Ошибка при изменении модели восстановления для базы '%s': %v", newDBName, err))
+			// Обновляем статус на "failed", несмотря на успешное восстановление
+			RestoreProgressesMutex.Lock()
+			if progress != nil {
+				progress.Status = "failed"
+				progress.Error = fmt.Sprintf("Ошибка изменения модели восстановления: %v", err)
+				progress.EndTime = time.Now()
+			}
+			RestoreProgressesMutex.Unlock()
+			return
+		}
+		
+		logging.LogInfo(fmt.Sprintf("Модель восстановления для базы данных '%s' изменена на SIMPLE.", newDBName))
+		
 		RestoreProgressesMutex.Lock()
 		if progress != nil {
 			progress.Status = "completed"

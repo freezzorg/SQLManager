@@ -1,6 +1,6 @@
 # Настройки подключения к SQL Server
 mssql:
-  server: "USQL1" # Имя тестового сервера 
+  server: "USQL2" # Имя тестового сервера 
   port: 1433
   user: "sa" # Имя пользователя SQL
   password: "Jc/x2no@" # Пароль SQL
