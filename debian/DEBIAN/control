@@ -4,7 +4,7 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Depends: 
-Maintainer: SQLManager Team
+Maintainer: KulikovVM
 Installed-Size: 7804
 Description: Web application for managing SQL Server databases
  SQLManager is a web application for managing SQL Server databases,
