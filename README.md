@@ -1,3 +1,4 @@
+![](https://github.com/freezzorg/SQLManager/blob/master/static/favicon.png)
 # SQLManager
 > Проект создан при помощи ~~смекалки и деатомайзера 7-й серии~~ чат-бота Gemini.
 ------------
@@ -228,4 +229,5 @@ whitelist:
 - либо собрать проект, используя статическую компиляцию Go
 ```bash
 CGO_ENABLED=0 go build -ldflags="-s -w -extldflags=-static -X main.version=1.0.0" -a -tags netgo -o sqlmanager
+
 ```
