@@ -14,7 +14,6 @@ build/
 *.out
 *.log
 __debug_bin*
-sqlmanager*
 
 # Директории и файлы Visual Studio Code
 .vscode/*
@@ -27,3 +26,5 @@ sqlmanager*
 *.vsix
 
 #
+debian/*
+!debian/DEBIAN
