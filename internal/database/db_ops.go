@@ -68,6 +68,43 @@ var RestoreProgressesMutex sync.Mutex
 var BackupProgresses = make(map[string]*BackupProgress)
 var BackupProgressesMutex sync.Mutex
 
+// SetSingleUserMode - Перевод базы данных в однопользовательский режим
+func SetSingleUserMode(db *sql.DB, dbName string) error {
+	logging.LogDebug(fmt.Sprintf("Попытка перевода базы данных '%s' в однопользовательский режим", dbName))
+	query := fmt.Sprintf("ALTER DATABASE [%s] SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName)
+	if _, err := db.Exec(query); err != nil {
+		return fmt.Errorf("ошибка перевода базы данных '%s' в однопользовательский режим: %w", dbName, err)
+	}
+	logging.LogDebug(fmt.Sprintf("База данных '%s' переведена в однопользовательский режим", dbName))
+	return nil
+}
+
+// SetMultiUserMode - Перевод базы данных в многопользовательский режим
+func SetMultiUserMode(db *sql.DB, dbName string) error {
+	query := fmt.Sprintf("ALTER DATABASE [%s] SET MULTI_USER", dbName)
+	if _, err := db.Exec(query); err != nil {
+		return fmt.Errorf("ошибка перевода базы данных '%s' в многопользовательский режим: %w", dbName, err)
+	}
+	logging.LogDebug(fmt.Sprintf("База данных '%s' переведена в многопользовательский режим", dbName))
+	return nil
+}
+
+// checkDatabaseExists - Проверяет существование базы данных на сервере
+func checkDatabaseExists(db *sql.DB, dbName string) (bool, error) {
+	query := fmt.Sprintf("SELECT 1 FROM sys.databases WHERE name = N'%s'", dbName)
+	rows, err := db.Query(query)
+	if err != nil {
+		return false, fmt.Errorf("ошибка при проверке существования базы данных '%s': %w", dbName, err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		return true, nil
+	}
+	
+	return false, nil
+}
+
 // --- Утилиты для PIRT ---
 
 // GetBackupLogicalFiles - Получение логических имен файлов из бэкапа (для формирования MOVE)
@@ -384,7 +421,7 @@ func BuildRestoreChain(baseName string, allHeaders []BackupFileSequence, restore
 				// Если время восстановления не задано, добавляем все LOG файлы
 				filesToRestore = append(filesToRestore, file)
 			}
-	}
+		}
 	}
 	
 	if len(filesToRestore) == 0 {
@@ -447,6 +484,19 @@ func GetRestoreSequence(db *sql.DB, baseName string, restoreTime *time.Time, smb
 
 // StartRestore - Запускает асинхронный процесс восстановления базы данных
 func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *time.Time, smbSharePath, restorePath string) error {
+	// Проверяем, существует ли база данных на сервере
+	dbExists, err := checkDatabaseExists(db, newDBName)
+	if err != nil {
+		return fmt.Errorf("ошибка проверки существования базы данных '%s': %w", newDBName, err)
+	}
+	
+	// Если база существует, переводим её в однопользовательский режим перед восстановлением
+	if dbExists {
+		if err := SetSingleUserMode(db, newDBName); err != nil {
+			return fmt.Errorf("ошибка перевода базы '%s' в однопользовательский режим перед восстановлением: %w", newDBName, err)
+		}
+	}
+	
 	// Инициализация прогресса восстановления
 	// Создаем контекст для отмены операции восстановления
 	ctx, cancel := context.WithCancel(context.Background())
@@ -465,7 +515,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 	go func(ctx context.Context, cancel context.CancelFunc) { // Передаем контекст и функцию отмены
 		defer cancel() // Гарантируем вызов cancel при завершении горутины
 
-	logging.LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
+		logging.LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
 		if restoreTime != nil {
 			logging.LogDebug(fmt.Sprintf("Желаемое время восстановления (PIRT): %s", restoreTime.Format("2006-01-02 15:04:05")))
 		}
@@ -479,7 +529,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 		RestoreProgressesMutex.Unlock()
 
 		// 1. Получение последовательности бэкапов
-		filesToRestore, err := GetRestoreSequence(db, backupBaseName, restoreTime, smbSharePath)
+	filesToRestore, err := GetRestoreSequence(db, backupBaseName, restoreTime, smbSharePath)
 		if err != nil {
 			logging.LogError(fmt.Sprintf("Ошибка получения последовательности бэкапов для %s: %v", backupBaseName, err))
 			RestoreProgressesMutex.Lock()
@@ -494,7 +544,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 
 		// Обновляем общее количество файлов
 		RestoreProgressesMutex.Lock()
-		if progress != nil {
+	if progress != nil {
 			progress.TotalFiles = len(filesToRestore)
 		}
 		RestoreProgressesMutex.Unlock()
@@ -591,7 +641,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			}
 			
 			if isLastFile {
-				// Для последнего файла всегда используем RECOVERY.
+				// Для последного файла всегда используем RECOVERY.
 				// STOPAT не используется, так как точное время восстановления может не совпадать с границей транзакции.
 				recoveryOption = "RECOVERY"
 				logging.LogDebug("Последний файл в цепочке, используется RECOVERY (без STOPAT).")
@@ -633,7 +683,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			}
 		}
 		
-			logging.LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
+		logging.LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
 		
 		// Переводим базу данных на модель простого восстановления
 		alterRecoveryModelQuery := fmt.Sprintf("ALTER DATABASE [%s] SET RECOVERY SIMPLE", newDBName)
@@ -652,6 +702,20 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 		
 		logging.LogInfo(fmt.Sprintf("Модель восстановления для базы данных '%s' изменена на SIMPLE.", newDBName))
 		
+		// Переводим базу в многопользовательский режим после завершения восстановления
+	if err := SetMultiUserMode(db, newDBName); err != nil {
+			logging.LogError(fmt.Sprintf("Ошибка перевода базы '%s' в многопользовательский режим после восстановления: %v", newDBName, err))
+			// Обновляем статус на "failed", несмотря на успешное восстановление
+			RestoreProgressesMutex.Lock()
+			if progress != nil {
+				progress.Status = "failed"
+				progress.Error = fmt.Sprintf("Ошибка перевода в многопользовательский режим: %v", err)
+				progress.EndTime = time.Now()
+			}
+			RestoreProgressesMutex.Unlock()
+			return
+		}
+		
 		RestoreProgressesMutex.Lock()
 		if progress != nil {
 			progress.Status = "completed"
@@ -668,6 +732,11 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 
 // StartBackup - Запускает асинхронный процесс создания полного бэкапа базы данных
 func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
+	// Переводим базу в однопользовательский режим перед созданием бэкапа
+	if err := SetSingleUserMode(db, dbName); err != nil {
+		return fmt.Errorf("ошибка перевода базы '%s' в однопользовательский режим перед бэкапом: %w", dbName, err)
+	}
+	
 	BackupProgressesMutex.Lock()
 	BackupProgresses[dbName] = &BackupProgress{
 		Status:    "pending",
@@ -678,6 +747,13 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 	logging.LogWebInfo(fmt.Sprintf("Начато создание бэкапа базы '%s'...", dbName))
 
 	go func() {
+		defer func() {
+			// Всегда пытаемся перевести базу в многопользовательский режим после завершения бэкапа
+			if err := SetMultiUserMode(db, dbName); err != nil {
+				logging.LogError(fmt.Sprintf("Ошибка перевода базы '%s' в многопользовательский режим после бэкапа: %v", dbName, err))
+			}
+		}()
+		
 		// 1. Проверяем и монтируем SMB-шару при необходимости
 		if err := utils.EnsureSMBMounted(smbSharePath); err != nil {
 			logging.LogError(fmt.Sprintf("Не удалось смонтировать SMB-шару %s: %v", smbSharePath, err))
@@ -719,7 +795,7 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 		BackupProgressesMutex.Unlock()
 
 		// 2. Выполняем команду BACKUP DATABASE
-	backupQuery := fmt.Sprintf("BACKUP DATABASE [%s] TO DISK = N'%s' WITH INIT", dbName, backupFilePath)
+		backupQuery := fmt.Sprintf("BACKUP DATABASE [%s] TO DISK = N'%s' WITH INIT", dbName, backupFilePath)
 
 		logging.LogDebug(fmt.Sprintf("Выполнение BACKUP DATABASE: %s", backupQuery))
 
@@ -739,7 +815,7 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 
 		logging.LogWebInfo(fmt.Sprintf("Создание бэкапа базы '%s' успешно завершено", dbName))
 		BackupProgressesMutex.Lock()
-	if progress := BackupProgresses[dbName]; progress != nil {
+		if progress := BackupProgresses[dbName]; progress != nil {
 			progress.Percentage = 100
 			progress.Status = "completed"
 			progress.EndTime = time.Now()
@@ -753,6 +829,19 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 
 // DeleteDatabase - Удаление базы данных
 func DeleteDatabase(db *sql.DB, dbName string) error {
+	// Проверяем, существует ли база данных перед попыткой перевода в однопользовательский режим
+	dbExists, err := checkDatabaseExists(db, dbName)
+	if err != nil {
+		logging.LogDebug(fmt.Sprintf("Ошибка проверки существования базы '%s': %v", dbName, err))
+		// Продолжаем попытку удаления, даже если не удалось проверить существование
+	} else if dbExists {
+		// Если база существует, пытаемся перевести её в однопользовательский режим перед удалением
+		if err := SetSingleUserMode(db, dbName); err != nil {
+			// В случае ошибки при переводе в однопользовательский режим, всё равно пытаемся удалить базу
+			logging.LogDebug(fmt.Sprintf("Не удалось перевести базу '%s' в однопользовательский режим перед удалением: %v. Продолжаем удаление.", dbName, err))
+		}
+	}
+	
 	// 1. Удаляем базу данных.
 	// Перевод в SINGLE_USER не требуется, так как база не используется во время восстановления.
 	deleteQuery := fmt.Sprintf("DROP DATABASE [%s]", dbName)
@@ -775,17 +864,17 @@ func KillRestoreSession(db *sql.DB, dbName string) error {
 	
 	rows, err := db.Query(query)
 	if err != nil {
-		return fmt.Errorf("ошибка при запросе активных сессий восстановления для БД '%s': %w", dbName, err)
+	return fmt.Errorf("ошибка при запросе активных сессий восстановления для БД '%s': %w", dbName, err)
 	}
 	defer rows.Close()
 
 	var sessionIDsToKill []int
 	for rows.Next() {
-		var sessionID int
+	var sessionID int
 		var commandText sql.NullString
 		if err := rows.Scan(&sessionID, &commandText); err != nil {
 			continue
-	}
+		}
 
 		// Проверяем, содержит ли текст команды имя целевой базы данных
 		if commandText.Valid && strings.Contains(commandText.String, fmt.Sprintf("DATABASE [%s]", dbName)) {
@@ -798,10 +887,10 @@ func KillRestoreSession(db *sql.DB, dbName string) error {
 	}
 
 	for _, sid := range sessionIDsToKill {
-		killQuery := fmt.Sprintf("KILL %d", sid)
+	killQuery := fmt.Sprintf("KILL %d", sid)
 		if _, err := db.Exec(killQuery); err != nil {
 			// Продолжаем, чтобы попытаться убить другие сессии
-		}
+	}
 	}
 
 	return nil
@@ -939,25 +1028,25 @@ func GetDatabases(db *sql.DB) ([]config.Database, error) {
 	switch strings.ToUpper(stateDesc) {
 		case "ONLINE":
 			dbItem.State = "online"
-	case "RESTORING", "RECOVERING": 
+		case "RESTORING", "RECOVERING": 
 			dbItem.State = "restoring"
 		case "OFFLINE":
 			dbItem.State = "offline"
-		default:
+	default:
 			dbItem.State = "error" 
 		}
 
 		// Дополнительная проверка: если база находится в процессе восстановления через наше приложение
-	RestoreProgressesMutex.Lock()
-	restoreProgress, restoreExists := RestoreProgresses[dbItem.Name]
+		RestoreProgressesMutex.Lock()
+		restoreProgress, restoreExists := RestoreProgresses[dbItem.Name]
 		RestoreProgressesMutex.Unlock()
 
 		if restoreExists && (restoreProgress.Status == "pending" || restoreProgress.Status == "in_progress") {
 			dbItem.State = "restoring" // Переопределяем статус, если наше приложение активно восстанавливает
-	}
+		}
 
 		// Дополнительная проверка: если база находится в процессе создания бэкапа через наше приложение
-		BackupProgressesMutex.Lock()
+	BackupProgressesMutex.Lock()
 		backupProgress, backupExists := BackupProgresses[dbItem.Name]
 		BackupProgressesMutex.Unlock()
 

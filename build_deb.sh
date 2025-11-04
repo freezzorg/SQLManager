@@ -169,6 +169,6 @@ fi
 
 # Создаем пакет
 echo "Создаем deb-пакет..."
-dpkg-deb --build debian build/sqlmanager-1.0.1-amd64.deb
+dpkg-deb --build debian build/sqlmanager-1.0.2-amd64.deb
 
-echo "Сборка завершена. Пакет: sqlmanager-1.0.1-amd64.deb"
+echo "Сборка завершена. Пакет: sqlmanager-1.0.2-amd64.deb"
