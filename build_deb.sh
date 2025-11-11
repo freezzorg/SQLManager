@@ -6,6 +6,37 @@ set -e  # Прерывать выполнение при ошибках
 
 echo "Начинаем сборку deb-пакета для SQLManager..."
 
+# Функция для увеличения patch версии
+increment_patch_version() {
+    local version_file="debian/DEBIAN/control"
+    local current_version=$(grep "^Version:" "$version_file" | cut -d' ' -f2)
+    echo "Текущая версия: $current_version"
+    
+    # Разбиваем версию на части
+    IFS='.' read -ra version_parts <<< "$current_version"
+    local major="${version_parts[0]}"
+    local minor="${version_parts[1]}"
+    local patch="${version_parts[2]}"
+    
+    # Увеличиваем patch версию
+    new_patch=$((patch + 1))
+    new_version="$major.$minor.$new_patch"
+    
+    # Обновляем версию в файле control
+    sed -i "s/^Version:.*/Version: $new_version/" "$version_file"
+    
+    echo "Новая версия: $new_version"
+    echo "$new_version" > .build_version  # Сохраняем версию в файл для использования ниже
+    
+    # Обновляем версию в файле примера конфига
+    if [ -f "config.yaml" ]; then
+        sed -i "s/version: $current_version/version: $new_version/" "config.yaml" 2>/dev/null || true
+    fi
+}
+
+# Увеличиваем patch версию перед сборкой
+increment_patch_version
+
 # Проверяем, установлен ли Go
 if ! command -v go &> /dev/null; then
     echo "Go не установлен. Установите Go перед продолжением."
@@ -30,8 +61,8 @@ mkdir -p debian/etc/logrotate.d
 
 # Копируем файлы приложения
 cp -r static debian/opt/SQLManager/
-# Копируем пример конфигурационного файла
-cp config.yaml debian/opt/SQLManager/config.yaml.example 2>/dev/null || true
+# Копируем конфигурационный файл
+cp config.yaml debian/opt/SQLManager/config.yaml 2>/dev/null || true
 
 # Копируем файл ротации лога
 cp sources/sqlmanager debian/etc/logrotate.d/
@@ -69,12 +100,6 @@ fi
 # Создаем директории, если не существуют
 mkdir -p /var/log/sqlmanager
 mkdir -p /mnt/sql_backups
-mkdir -p /etc/smbcredentials
-
-# Копируем пример конфигурационного файла, если config.yaml не существует
-if [ ! -f /opt/SQLManager/config.yaml ]; then
-    cp /opt/SQLManager/config.yaml.example /opt/SQLManager/config.yaml
-fi
 
 # Устанавливаем права на директории и файлы
 chown -R mssql:mssql /opt/SQLManager
@@ -91,9 +116,13 @@ chmod +x /opt/SQLManager/sqlmanager
 if [ -f /opt/SQLManager/config.yaml ]; then
     chmod 600 /opt/SQLManager/config.yaml
 fi
-# Устанавливаем права для примера конфигурационного файла
-if [ -f /opt/SQLManager/config.yaml.example ]; then
-    chmod 644 /opt/SQLManager/config.yaml.example
+
+# Создаем, если отсутствует, файл в /etc/smbcredentials/.veeamsrv_creds для выполнения команд монтирования
+if [ -f /etc/smbcredentials/.veeamsrv_creds ]; then
+    echo "username=user"  > /etc/smbcredentials/.veeamsrv_creds
+    echo "password=password"  > /etc/smbcredentials/.veeamsrv_creds
+    echo "domain=domain" > /etc/smbcredentials/.veeamsrv_creds
+    chmod 640 /etc/smbcredentials/.veeamsrv_creds
 fi
 
 # Устанавливаем права на лог-файл, если он существует
@@ -102,22 +131,25 @@ if [ -f /var/log/sqlmanager/sqlmanager.log ]; then
 fi
 chmod 750 /var/log/sqlmanager
 
-# Создаем файл в /etc/sudoers.d для выполнения команд монтирования
-echo "mssql ALL=(ALL) NOPASSWD: /bin/systemctl start mnt-sql_backups.mount, /bin/systemctl status mnt-sql_backups.mount" > /etc/sudoers.d/sqlmanager
-chmod 440 /etc/sudoers.d/sqlmanager
+# Создаем, если отсутствует, файл в /etc/sudoers.d для выполнения команд монтирования
+if [ -f /etc/sudoers.d/sqlmanager ]; then
+    echo "mssql ALL=(ALL) NOPASSWD: /bin/systemctl start mnt-sql_backups.mount, /bin/systemctl status mnt-sql_backups.mount" > /etc/sudoers.d/sqlmanager
+    chmod 440 /etc/sudoers.d/sqlmanager
+fi
 
 # Перезагружаем systemd
 systemctl daemon-reload || true
 
 # Включаем и запускаем сервисы
 systemctl enable mnt-sql_backups.mount || true
-systemctl start mnt-sql_backups.mount || true
+# systemctl start mnt-sql_backups.mount || true
 systemctl enable sqlmanager.service || true
-systemctl start sqlmanager.service || true
+# systemctl start sqlmanager.service || true
 
 echo
-echo "SQLManager установлен. Пожалуйста, настройте /opt/SQLManager/config.yaml и /etc/smbcredentials/.veeamsrv_creds перед использованием."
-echo "После настройки запустите приложение командой: sudo systemctl start sqlmanager.service или перезагрузите сервер."
+echo "SQLManager установлен."
+echo "!!! Пожалуйста, отредактируйте файлы: /etc/smbcredentials/.veeamsrv_creds и /opt/SQLManager/config.yaml, если устанавливаете приложение впервые !!!"
+echo "После настройки запустите службы: sudo systemctl start mnt-sql_backups.mount и sudo systemctl start sqlmanager.service или перезагрузите сервер."
 EOF
 
 # Создаем prerm скрипт (выполняется перед удалением)
@@ -169,6 +201,10 @@ fi
 
 # Создаем пакет
 echo "Создаем deb-пакет..."
-dpkg-deb --build debian build/sqlmanager-1.0.3-amd64.deb
+NEW_VERSION=$(cat .build_version)
+dpkg-deb --build debian build/sqlmanager-$NEW_VERSION-amd64.deb
 
-echo "Сборка завершена. Пакет: sqlmanager-1.0.3-amd64.deb"
+echo "Сборка завершена. Пакет: sqlmanager-$NEW_VERSION-amd64.deb"
+
+# Удаляем временный файл с версией
+rm -f .build_version

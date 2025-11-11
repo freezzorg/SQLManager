@@ -3,11 +3,11 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,333 +16,157 @@ import (
 	"github.com/freezzorg/SQLManager/internal/utils"
 )
 
+// BackupMetadata представляет структуру данных из backup_metadate.json
+type BackupMetadata struct {
+	FileName          string     `json:"FileName"`
+	Start             CustomTime `json:"Start"`
+	End               CustomTime `json:"End"`
+	Type              string     `json:"Type"` // Database, Database Differential, Log
+	FirstLSN          string     `json:"FirstLSN"`
+	DatabaseBackupLSN string     `json:"DatabaseBackupLSN"`
+	CheckpointLSN     string     `json:"CheckpointLSN"`
+	LastLSN           string     `json:"LastLSN"`
+	IsCopyOnly        bool       `json:"IsCopyOnly"`
+}
+
+// CustomTime представляет собой кастомный тип времени для формата "2006-01-02T15:04:05"
+type CustomTime struct {
+	time.Time
+}
+
+// UnmarshalJSON реализует интерфейс json.Unmarshaler для CustomTime
+func (ct *CustomTime) UnmarshalJSON(b []byte) error {
+	// Убираем кавычки из строки JSON
+	s := strings.Trim(string(b), "\"")
+	
+	// Парсим время в формате "206-01-02T15:04:05"
+	t, err := time.Parse("2006-01-02T15:04:05", s)
+	if err != nil {
+	return fmt.Errorf("не удалось распарсить время '%s': %w", s, err)
+	}
+	
+	ct.Time = t
+	return nil
+}
+
+// MarshalJSON реализует интерфейс json.Marshaler для CustomTime
+func (ct CustomTime) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ct.Time.Format("2006-01-02T15:04:05"))
+}
+
+// Методы для сравнения времени
+func (ct CustomTime) After(t time.Time) bool {
+	return ct.Time.After(t)
+}
+
+func (ct CustomTime) Before(t time.Time) bool {
+	return ct.Time.Before(t)
+}
+
+func (ct CustomTime) Equal(t time.Time) bool {
+	return ct.Time.Equal(t)
+}
+
+// Методы для сравнения CustomTime с CustomTime
+func (ct CustomTime) AfterCT(other CustomTime) bool {
+	return ct.Time.After(other.Time)
+}
+
+func (ct CustomTime) BeforeCT(other CustomTime) bool {
+	return ct.Time.Before(other.Time)
+}
+
+func (ct CustomTime) EqualCT(other CustomTime) bool {
+	return ct.Time.Equal(other.Time)
+}
+
 // GetBackupLogicalFiles - Получение логических имен файлов из бэкапа (для формирования MOVE)
 func GetBackupLogicalFiles(db *sql.DB, backupPath string) ([]BackupLogicalFile, error) {
 	query := fmt.Sprintf("RESTORE FILELISTONLY FROM DISK = N'%s'", backupPath)
 
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("ошибка при запросе RESTORE FILELISTONLY: %w", err)
-	}
-	defer rows.Close()
+    rows, err := db.Query(query)
+    if err != nil {
+        return nil, fmt.Errorf("ошибка при запросе RESTORE FILELISTONLY для файла %s: %w", backupPath, err)
+    }
+    defer rows.Close()
 
-	columnNames, colErr := rows.Columns()
-	if colErr != nil {
-		return nil, fmt.Errorf("ошибка получения имен столбцов: %w", colErr)
-	}
-	numColumns := len(columnNames)
+    columnNames, err := rows.Columns()
+    if err != nil {
+        return nil, fmt.Errorf("ошибка получения имен столбцов для файла %s: %w", backupPath, err)
+    }
 
-	var logicalFiles []BackupLogicalFile
-	for rows.Next() {
-	// Используем sql.RawBytes для всех столбцов
-		columns := make([]sql.RawBytes, numColumns)
-		scanArgs := make([]interface{}, numColumns)
-		for i := range columns {
-			scanArgs[i] = &columns[i]
-		}
+    // Ищем индексы нужных столбцов
+    var logicalNameIdx, typeIdx int = -1, -1
+    for i, name := range columnNames {
+        switch name {
+        case "LogicalName":
+            logicalNameIdx = i
+        case "Type":
+            typeIdx = i
+        }
+    }
+    if logicalNameIdx == -1 || typeIdx == -1 {
+        return nil, fmt.Errorf("не найдены столбцы LogicalName или Type для файла %s", backupPath)
+    }
 
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, fmt.Errorf("ошибка сканирования строки RESTORE FILELISTONLY: %w", err)
-		}
+    var logicalFiles []BackupLogicalFile
+    for rows.Next() {
+        columns := make([]sql.RawBytes, len(columnNames))
+        scanArgs := make([]interface{}, len(columnNames))
+        for i := range columns {
+            scanArgs[i] = &columns[i]
+        }
 
-		// Извлекаем нужные значения из sql.RawBytes
-	var logicalName, fileType string
-		// Предполагаем, что LogicalName - это первый столбец, а Type - третий.
-		// Это соответствует выводу RESTORE FILELISTONLY.
-		if len(columns[0]) > 0 { // LogicalName
-			logicalName = string(columns[0])
-		}
-		if len(columns[2]) > 0 { // Type (D, L)
-			fileType = string(columns[2])
-		}
+        if err := rows.Scan(scanArgs...); err != nil {
+            return nil, fmt.Errorf("ошибка сканирования строки RESTORE FILELISTONLY для файла %s: %w", backupPath, err)
+        }
 
-		switch strings.ToUpper(fileType) {
-		case "D":
-			logicalFiles = append(logicalFiles, BackupLogicalFile{
-				LogicalName: logicalName,
-				Type:        "DATA",
-			})
-		case "L":
-			logicalFiles = append(logicalFiles, BackupLogicalFile{
-				LogicalName: logicalName,
-				Type:        "LOG",
-			})
-		}
-	}
+        var logicalName, fileType string
+        if logicalNameIdx < len(columns) && len(columns[logicalNameIdx]) > 0 {
+            logicalName = string(columns[logicalNameIdx])
+        }
+        if typeIdx < len(columns) && len(columns[typeIdx]) > 0 {
+            fileType = string(columns[typeIdx])
+        }
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("ошибка после итерации строк RESTORE FILELISTONLY: %w", err)
-	}
+        if logicalName == "" || fileType == "" {
+            continue // Пропускаем строки с пустыми значениями
+        }
 
-	if len(logicalFiles) == 0 {
-		return nil, fmt.Errorf("RESTORE FILELISTONLY не вернул DATA или LOG файлы")
-	}
+        switch strings.ToUpper(fileType) {
+        case "D":
+            logicalFiles = append(logicalFiles, BackupLogicalFile{
+                LogicalName: logicalName,
+                Type:        "DATA",
+            })
+        case "L":
+            logicalFiles = append(logicalFiles, BackupLogicalFile{
+                LogicalName: logicalName,
+                Type:        "LOG",
+            })
+        }
+    }
 
-	return logicalFiles, nil
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("ошибка после итерации строк RESTORE FILELISTONLY для файла %s: %w", backupPath, err)
+    }
+
+    if len(logicalFiles) == 0 {
+        return nil, fmt.Errorf("RESTORE FILELISTONLY не вернул DATA или LOG файлы для файла %s", backupPath)
+    }
+
+    return logicalFiles, nil
 }
 
-// GetBackupHeaderInfo - Новая функция для выполнения RESTORE HEADERONLY и получения метаданных
-func GetBackupHeaderInfo(db *sql.DB, backupPath string) ([]BackupFileSequence, error) {
-	query := fmt.Sprintf("RESTORE HEADERONLY FROM DISK = N'%s'", backupPath)
-
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("ошибка при запросе RESTORE HEADERONLY для %s: %w", backupPath, err)
-	}
-	defer rows.Close()
-
-	columnNames, colErr := rows.Columns()
-	if colErr != nil {
-		return nil, fmt.Errorf("ошибка получения имен столбцов для HEADERONLY: %w", colErr)
-	}
-
-	colIndexMap := make(map[string]int)
-	for i, name := range columnNames {
-		colIndexMap[name] = i
-	}
-
-	requiredColumns := []string{"BackupType", "DatabaseName", "BackupFinishDate", "Position", "FirstLSN", "LastLSN", "DatabaseBackupLSN"}
-	for _, col := range requiredColumns {
-		if _, exists := colIndexMap[col]; !exists {
-			return nil, fmt.Errorf("в результатах RESTORE HEADERONLY отсутствует критически важный столбец: %s", col)
-	}
-	}
-
-	var allHeaders []BackupFileSequence
-	for rows.Next() {
-	var (
-			backupTypeRaw sql.RawBytes
-			databaseNameRaw sql.RawBytes
-			backupFinishDateRaw sql.RawBytes
-			positionRaw sql.RawBytes
-			firstLSNRaw sql.RawBytes
-			lastLSNRaw sql.RawBytes
-			databaseBackupLSNRaw sql.RawBytes
-		)
-
-	// Создаем слайс для сканирования всех столбцов в sql.RawBytes
-		rawColumns := make([]sql.RawBytes, len(columnNames))
-		scanArgs := make([]interface{}, len(columnNames))
-		for i := range rawColumns {
-			scanArgs[i] = &rawColumns[i]
-	}
-
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, fmt.Errorf("ошибка сканирования строки RESTORE HEADERONLY для %s: %w", backupPath, err)
-	}
-
-		// Присваиваем RawBytes соответствующим переменным, используя colIndexMap
-		if idx, ok := colIndexMap["BackupType"]; ok {
-			backupTypeRaw = rawColumns[idx]
-		}
-		if idx, ok := colIndexMap["DatabaseName"]; ok {
-			databaseNameRaw = rawColumns[idx]
-		}
-		if idx, ok := colIndexMap["BackupFinishDate"]; ok {
-			backupFinishDateRaw = rawColumns[idx]
-		}
-		if idx, ok := colIndexMap["Position"]; ok {
-			positionRaw = rawColumns[idx]
-		}
-		if idx, ok := colIndexMap["FirstLSN"]; ok {
-			firstLSNRaw = rawColumns[idx]
-		}
-		if idx, ok := colIndexMap["LastLSN"]; ok {
-			lastLSNRaw = rawColumns[idx]
-		}
-		if idx, ok := colIndexMap["DatabaseBackupLSN"]; ok {
-			databaseBackupLSNRaw = rawColumns[idx]
-		}
-
-		// Извлечение и преобразование данных из sql.RawBytes
-		var (
-			backupTypeStr string
-			databaseName  string
-			finishDate    time.Time
-			position      int
-			firstLSN      string
-			lastLSN       string
-			dbBackupLSN   string
-		)
-
-		if len(backupTypeRaw) > 0 {
-			backupTypeStr = string(backupTypeRaw)
-		}
-		if len(databaseNameRaw) > 0 {
-			databaseName = string(databaseNameRaw)
-	}
-		if len(backupFinishDateRaw) > 0 {
-			// Попытка парсинга с миллисекундами
-			finishDate, err = time.Parse("2006-01-02T15:04:05.00Z", string(backupFinishDateRaw))
-			if err != nil {
-				// Если не удалось, попытка парсинга без миллисекунд
-				finishDate, err = time.Parse("2006-01-02T15:04:05Z", string(backupFinishDateRaw))
-				if err != nil {
-					finishDate = time.Time{}
-				}
-			}
-		}
-		if len(positionRaw) > 0 {
-			position, err = strconv.Atoi(string(positionRaw))
-			if err != nil {
-				position = 0
-			}
-		}
-		if len(firstLSNRaw) > 0 {
-			firstLSN = string(firstLSNRaw)
-		}
-	if len(lastLSNRaw) > 0 {
-			lastLSN = string(lastLSNRaw)
-		}
-	if len(databaseBackupLSNRaw) > 0 {
-			dbBackupLSN = string(databaseBackupLSNRaw)
-		}
-
-		var fileType string
-		backupTypeInt, err := strconv.Atoi(backupTypeStr)
-		if err != nil {
-			continue
-		}
-
-		switch backupTypeInt {
-		case 1:
-			fileType = "FULL"
-		case 5:
-			fileType = "DIFF"
-		case 2:
-			fileType = "LOG"
-		default:
-			continue
-		}
-
-		allHeaders = append(allHeaders, BackupFileSequence{
-			Path:              backupPath,
-			Type:              fileType,
-			BackupFinishDate:  finishDate,
-			DatabaseName:      databaseName,
-			Position:          position,
-			FirstLSN:          firstLSN,
-			LastLSN:           lastLSN,
-			DatabaseBackupLSN: dbBackupLSN,
-		})
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("ошибка после итерации строк RESTORE HEADERONLY: %w", err)
-	}
-
-	return allHeaders, nil
-}
-
-// BuildRestoreChain - Определяет последовательность бэкапов для восстановления на указанный момент времени
-func BuildRestoreChain(baseName string, allHeaders []BackupFileSequence, restoreTime *time.Time) ([]BackupFileSequence, error) {
-	// 1. Фильтруем по имени базы данных
-	var filteredBackups []BackupFileSequence
-	for _, h := range allHeaders {
-		// Имя базы данных должно совпадать с baseName (имя папки)
-		if strings.EqualFold(h.DatabaseName, baseName) {
-			filteredBackups = append(filteredBackups, h)
-		}
-	}
-	
-	if len(filteredBackups) == 0 {
-		return nil, fmt.Errorf("не найдено бэкапов в заголовках, соответствующих базе данных: %s", baseName)
-	}
-	
-	// 2. Сортируем по времени завершения (от старых к новым)
-	sort.Slice(filteredBackups, func(i, j int) bool {
-		return filteredBackups[i].BackupFinishDate.Before(filteredBackups[j].BackupFinishDate)
-	})
-
-	// 3. Ищем самый свежий FULL бэкап, созданный ДО (или в) restoreTime
-	var fullBackup *BackupFileSequence
-	for i := len(filteredBackups) - 1; i >= 0; i-- {
-	file := filteredBackups[i]
-		if file.Type == "FULL" {
-			// Если restoreTime не задано, берем самый свежий FULL. 
-			// Если задано, берем самый свежий FULL, который был создан ДО (или в) restoreTime.
-			if restoreTime == nil || !file.BackupFinishDate.After(*restoreTime) {
-				fullBackup = &file
-				break
-			}
-		}
-	}
-
-	if fullBackup == nil {
-		return nil, fmt.Errorf("не найден подходящий полный бэкап (FULL) до указанного времени")
-	}
-
-	// 4. Ищем самый свежий DIFF бэкап, созданный ПОСЛЕ FULL, совместимый по LSN и ДО (или в) restoreTime
-	var diffBackup *BackupFileSequence
-	
-	for i := len(filteredBackups) - 1; i >= 0; i-- {
-		file := filteredBackups[i]
-		if file.Type == "DIFF" {
-			// DIFF должен быть сделан после FULL
-			if file.BackupFinishDate.After(fullBackup.BackupFinishDate) {
-				// DIFF должен быть совместим с FULL (по LSN): Diff.DatabaseBackupLSN == Full.FirstLSN
-				// Исправлено: DatabaseBackupLSN DIFF бэкапа должен совпадать с FirstLSN полного бэкапа, на котором он основан.
-				if file.DatabaseBackupLSN == fullBackup.FirstLSN {
-					// И DIFF должен быть до (или в) restoreTime
-					if restoreTime == nil || !file.BackupFinishDate.After(*restoreTime) {
-						diffBackup = &file
-						break // Нашли самый свежий подходящий DIFF
-					}
-				}
-			}
-		}
-	}
-
-	// 5. Формируем последовательность: FULL -> [DIFF] -> [LOGs]
-	filesToRestore := make([]BackupFileSequence, 0)
-	
-	// Добавляем FULL
-	filesToRestore = append(filesToRestore, *fullBackup)
-
-	// Добавляем DIFF, если он найден
-	if diffBackup != nil {
-		filesToRestore = append(filesToRestore, *diffBackup)
-	}
-
-	// Определяем время, после которого должны идти LOG файлы (после FULL или DIFF)
-	lastBackupTime := fullBackup.BackupFinishDate
-	if diffBackup != nil {
-		lastBackupTime = diffBackup.BackupFinishDate
-	}
-
-	// 6. Добавляем LOG бэкапы после последнего добавленного (FULL или DIFF), в хронологическом порядке
-	for _, file := range filteredBackups {
-		if file.Type == "LOG" && file.BackupFinishDate.After(lastBackupTime) {
-			// Если задано время восстановления
-			if restoreTime != nil {
-				// Если текущий лог завершен после желаемого времени восстановления,
-				// то этот лог может содержать нужную точку восстановления.
-				// Добавляем его и прерываем цикл.
-				if file.BackupFinishDate.After(*restoreTime) {
-					filesToRestore = append(filesToRestore, file)
-					break
-				}
-				// В противном случае добавляем LOG, если он до времени восстановления
-				if file.BackupFinishDate.Before(*restoreTime) || file.BackupFinishDate.Equal(*restoreTime) {
-					filesToRestore = append(filesToRestore, file)
-				}
-			} else {
-				// Если время восстановления не задано, добавляем все LOG файлы
-				filesToRestore = append(filesToRestore, file)
-			}
-		}
-	}
-	
-	if len(filesToRestore) == 0 {
-		return nil, fmt.Errorf("не удалось сформировать цепочку восстановления")
-	}
-
-	return filesToRestore, nil
+// compareLSN производит лексикографическое сравнение строк (подходит для формата вида 1454000000767000081)
+func compareLSN(a, b string) int {
+	if a == b {	return 0 }
+	if a > b { return 1	}
+	return -1
 }
 
 // GetRestoreSequence - Определяет последовательность бэкапов для восстановления на указанный момент времени
-// (обертка для чтения файлов и построения цепочки)
-func GetRestoreSequence(db *sql.DB, baseName string, restoreTime *time.Time, smbSharePath string) ([]BackupFileSequence, error) {
+func GetRestoreSequence(db *sql.DB, baseName string, restoreTime *time.Time, smbSharePath string) ([]BackupMetadata, error) {
 	// 1. Проверяем и монтируем SMB-шару при необходимости
 	if err := utils.EnsureSMBMounted(smbSharePath); err != nil {
 		return nil, fmt.Errorf("не удалось смонтировать SMB-шару %s: %w", smbSharePath, err)
@@ -351,44 +175,159 @@ func GetRestoreSequence(db *sql.DB, baseName string, restoreTime *time.Time, smb
 	// Формируем путь к директории бэкапов
 	backupDir := filepath.Join(smbSharePath, baseName)
 	
-	// Читаем все файлы бэкапов для этой базы
-	entries, err := os.ReadDir(backupDir)
+	// Проверяем существование файла метаданных
+	metadataPath := filepath.Join(backupDir, "backup_metadata.json")
+	
+	// Проверяем существование файла метаданных
+	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("файл метаданных %s не найден", metadataPath)
+	}
+	
+	// Читаем файл метаданных
+	data, err := os.ReadFile(metadataPath)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка чтения директории бэкапа %s: %w", backupDir, err)
+		return nil, fmt.Errorf("ошибка чтения файла метаданных %s: %w", metadataPath, err)
+	}
+	
+	// Парсим JSON
+	var allHeaders []BackupMetadata
+	if err := json.Unmarshal(data, &allHeaders); err != nil {
+		return nil, fmt.Errorf("ошибка парсинга файла метаданных %s: %w", metadataPath, err)
 	}
 
-	var allHeaders []BackupFileSequence
+	// Строим цепочку восстановления
+	// Имя базы данных в BackupMetadata не содержится, но мы фильтруем по baseName вызывающем коде
+	backups := make([]BackupMetadata, len(allHeaders))
+	copy(backups, allHeaders)
 	
-	for _, entry := range entries {
-		filename := entry.Name()
-		// Проверяем только потенциально нужные файлы, чтобы не нагружать SQL Server
-		if strings.HasSuffix(strings.ToLower(filename), ".bak") || 
-			strings.HasSuffix(strings.ToLower(filename), ".diff") || 
-			strings.HasSuffix(strings.ToLower(filename), ".trn") {
-			
-			fullPath := filepath.Join(backupDir, filename)
-			
-			// Получаем HEADERONLY. В одном файле может быть несколько бэкапов.
-			headers, err := GetBackupHeaderInfo(db, fullPath)
-			if err != nil {
-				// Пропускаем ошибку, но продолжаем
-				continue
+	if len(backups) == 0 {
+		return nil, fmt.Errorf("не найдено бэкапов для базы данных: %s", baseName)
+	}
+
+	// Отфильтруем бэкапы, которые завершились до targetTime
+	var validBackups []BackupMetadata
+	for _, b := range backups {
+		if restoreTime == nil || b.End.Before(*restoreTime) || b.End.Equal(*restoreTime) {
+			validBackups = append(validBackups, b)
+		}
+	}
+	if len(validBackups) == 0 {
+		return nil, fmt.Errorf("нет бэкапов до указанного времени")
+	}
+
+	// В начале ищем последний полный бэкап (Database, IsCopyOnly == false) перед targetTime с максимальным End
+	var fullBackups []BackupMetadata
+	for _, b := range validBackups {
+		if b.Type == "Database" && !b.IsCopyOnly {
+			fullBackups = append(fullBackups, b)
+		}
+	}
+	if len(fullBackups) == 0 {
+		return nil, fmt.Errorf("нет полного бэкапа для базы")
+	}
+	sort.Slice(fullBackups, func(i, j int) bool {
+		return fullBackups[i].End.AfterCT(fullBackups[j].End)
+	})
+	fullBackup := fullBackups[0]
+	restoreChain := []BackupMetadata{fullBackup}
+
+	// Далее добавляем дифференциальный бэкап, если есть, сделанный после полного и до targetTime
+	var diffBackups []BackupMetadata
+	for _, b := range validBackups {
+		if b.Type == "Database Differential" && !b.IsCopyOnly && compareLSN(b.DatabaseBackupLSN, fullBackup.FirstLSN) == 0 {
+			if b.End.AfterCT(fullBackup.End) && (restoreTime == nil || b.End.Before(*restoreTime) || b.End.Equal(*restoreTime)) {
+				diffBackups = append(diffBackups, b)
 			}
-			allHeaders = append(allHeaders, headers...)
+		}
+	}
+	if len(diffBackups) > 0 {
+		sort.Slice(diffBackups, func(i, j int) bool {
+			return diffBackups[i].End.AfterCT(diffBackups[j].End)
+		})
+		diffBackup := diffBackups[0]
+		restoreChain = append(restoreChain, diffBackup)
+	}
+
+	// Построение цепочки журнальных бэкапов
+	lastBackup := restoreChain[len(restoreChain)-1]
+	var logBackups []BackupMetadata
+	for _, b := range validBackups {
+		if b.Type == "Transaction Log" && !b.IsCopyOnly {
+			// Проверяем, что транзакционный лог основан на том же полном бэкапе, что и цепочка
+			if compareLSN(b.DatabaseBackupLSN, fullBackup.FirstLSN) == 0 {
+				// Также проверяем, что транзакционный лог был создан после последнего бэкапа в цепочке
+				if b.Start.AfterCT(lastBackup.End) || b.Start.EqualCT(lastBackup.End) {
+					logBackups = append(logBackups, b)
+				}
+			}
 		}
 	}
 
-	if len(allHeaders) == 0 {
-		return nil, fmt.Errorf("в директории %s не найдено валидных файлов бэкапов", backupDir)
+	// Сортируем журнальные бэкапы по FirstLSN
+	sort.Slice(logBackups, func(i, j int) bool {
+		return compareLSN(logBackups[i].FirstLSN, logBackups[j].FirstLSN) < 0
+	})
+
+	// Находим первый журнальный бэкап, который может быть использован для продолжения цепочки
+	// FirstLSN журнала может быть <= LastLSN предыдущего бэкапа, но при этом лог должен быть создан после предыдущего бэкапа
+	var firstLog *BackupMetadata
+	for i, log := range logBackups {
+		// Проверяем, что FirstLSN лога <= LastLSN предыдущего бэкапа
+		if compareLSN(log.FirstLSN, lastBackup.LastLSN) <= 0 {
+			firstLog = &logBackups[i]
+			restoreChain = append(restoreChain, log)
+			break
+		}
 	}
 
-	// 2. Строим цепочку восстановления
-	filesToRestore, err := BuildRestoreChain(baseName, allHeaders, restoreTime)
-	if err != nil {
-		return nil, err
+	// Если первый транзакционный лог не найден, но они есть, проверяем возможность восстановления
+	if firstLog == nil && len(logBackups) > 0 {
+		// Если все транзакционные логи начинаются после LastLSN предыдущего бэкапа, восстановление невозможно
+		// Но если восстанавливаем на момент времени окончания предыдущего бэкапа, то можно обойтись без транзакционных логов
+		if restoreTime != nil && lastBackup.End.Before(*restoreTime) {
+			return nil, fmt.Errorf("не найден подходящий транзакционный лог для продолжения цепочки восстановления")
 	}
-	
-	return filesToRestore, nil
+	}
+
+	// Добавляем остальные журнальные бэкапы, если они есть, с учетом непрерывности цепочки
+	// После добавления первого журнального бэкапа, остальные должны следовать последовательно
+	if firstLog != nil {
+		currentLSN := firstLog.LastLSN
+	for _, log := range logBackups {
+			// Пропускаем уже добавленный бэкап
+			if log.FileName == firstLog.FileName {
+				continue
+			}
+			// Для остальных транзакционных логов: FirstLSN == LastLSN предыдущего
+			if compareLSN(log.FirstLSN, currentLSN) == 0 {
+				restoreChain = append(restoreChain, log)
+				currentLSN = log.LastLSN
+			}
+		}
+	}
+
+	// Проверяем непрерывность цепочки по LSN
+	// Только для транзакционных логов: первый может начинаться до LastLSN предыдущего бэкапа, но остальные должны точно стыковаться
+	for i := 1; i < len(restoreChain); i++ {
+		prev := restoreChain[i-1]
+		curr := restoreChain[i]
+		if curr.Type == "Transaction Log" && prev.Type == "Transaction Log" {
+			// Только между транзакционными логами: FirstLSN == LastLSN предыдущего
+			if compareLSN(curr.FirstLSN, prev.LastLSN) != 0 {
+				return nil, fmt.Errorf("порвана цепочка: журнал %s (FirstLSN=%s) не стыкуется с предыдущим %s (LastLSN=%s)", 
+					curr.FileName, curr.FirstLSN, prev.FileName, prev.LastLSN)
+			}
+		}
+	}
+
+	// Логируем имена файлов в цепочке
+	var chainFileNames []string
+	for _, backup := range restoreChain {
+		chainFileNames = append(chainFileNames, backup.FileName)
+	}
+	logging.LogDebug(fmt.Sprintf("Цепочка восстановления для базы %s: %v", baseName, chainFileNames))
+
+	return restoreChain, nil
 }
 
 // StartRestore - Запускает асинхронный процесс восстановления базы данных
@@ -396,7 +335,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 	// Проверяем, существует ли база данных на сервере
 	dbExists, err := checkDatabaseExists(db, newDBName)
 	if err != nil {
-	return fmt.Errorf("ошибка проверки существования базы данных '%s': %w", newDBName, err)
+		return fmt.Errorf("ошибка проверки существования базы данных '%s': %w", newDBName, err)
 	}
 	
 	// Если база существует, переводим её в однопользовательский режим перед восстановлением
@@ -424,13 +363,13 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 	go func(ctx context.Context, cancel context.CancelFunc) { // Передаем контекст и функцию отмены
 		defer cancel() // Гарантируем вызов cancel при завершении горутины
 
-	logging.LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
+		logging.LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
 		if restoreTime != nil {
 			logging.LogDebug(fmt.Sprintf("Желаемое время восстановления (PIRT): %s", restoreTime.Format("2006-01-02 15:04:05")))
 		}
 
 		// Обновляем статус на "in_progress"
-	RestoreProgressesMutex.Lock()
+		RestoreProgressesMutex.Lock()
 		progress := RestoreProgresses[newDBName]
 		if progress != nil {
 			progress.Status = "in_progress"
@@ -459,10 +398,12 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 		RestoreProgressesMutex.Unlock()
 
 		// 2. Определение первого файла и логических имен
+		// Используем FileName из BackupMetadata
 		startFile := filesToRestore[0]
 		
 		// Получаем логические имена файлов из первого файла в цепочке (startFile)
-		logicalFiles, err := GetBackupLogicalFiles(db, startFile.Path)
+		backupFilePath := filepath.Join(smbSharePath, backupBaseName, startFile.FileName)
+		logicalFiles, err := GetBackupLogicalFiles(db, backupFilePath)
 		if err != nil {
 			logging.LogError(fmt.Sprintf("Ошибка получения логических имен файлов бэкапа для %s: %v", backupBaseName, err))
 			RestoreProgressesMutex.Lock()
@@ -478,7 +419,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 
 		// 3. Формируем MOVE-часть команды RESTORE
 		var moveClause string
-	var moveParts []string
+		var moveParts []string
 		
 		for _, logicalFile := range logicalFiles {
 			var ext string
@@ -530,7 +471,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			RestoreProgressesMutex.Lock()
 			if progress != nil {
 				progress.CompletedFiles = i
-				progress.CurrentFile = filepath.Base(file.Path)
+				progress.CurrentFile = filepath.Base(file.FileName)
 				if progress.TotalFiles > 0 {
 					progress.Percentage = (i * 100) / progress.TotalFiles
 				}
@@ -542,44 +483,47 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			var restoreQuery string
 			
 			var recoveryOption string
-			var filePositionClause string // Clause для указания позиции в файле
-			
-			// Если в одном файле несколько бэкапов (Position > 1), нужно указать POSITION
-			if file.Position > 1 {
-				filePositionClause = fmt.Sprintf(", FILE = %d", file.Position)
-			}
+			// file.Position больше не доступен, так как мы используем BackupMetadata
+			// Предполагаем, что каждый файл содержит один бэкап на позиции 1
+			filePositionClause := ", FILE = 1"
 			
 			if isLastFile {
 				// Для последного файла всегда используем RECOVERY.
 				// STOPAT не используется, так как точное время восстановления может не совпадать с границей транзакции.
 				recoveryOption = "RECOVERY"
-				logging.LogDebug("Последний файл в цепочке, используется RECOVERY (без STOPAT).")
+				logging.LogDebug("Последний файл в цепочке, используется RECOVERY.")
 			} else {
 				// Не последний бэкап: всегда используем NORECOVERY без STOPAT
 				recoveryOption = "NORECOVERY"
-				logging.LogDebug(fmt.Sprintf("Промежуточный файл в цепочке, используется NORECOVERY (без STOPAT). Тип: %s", file.Type))
+				logging.LogDebug(fmt.Sprintf("Промежуточный файл в цепочке, используется NORECOVERY. Тип: %s", file.Type))
 			}
 			
 			// Формирование команды RESTORE
+			// Создаем полный путь к файлу бэкапа через smbSharePath
+			backupFilePath := filepath.Join(smbSharePath, backupBaseName, file.FileName)
+			
 			if isFirstFile {
 				// Первый файл (FULL/DIFF) использует MOVE и REPLACE
-				restoreQuery = fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s' WITH %s, REPLACE%s, %s, STATS = 10", newDBName, file.Path, moveClause, filePositionClause, recoveryOption)
+				restoreQuery = fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s' WITH %s, REPLACE%s, %s, STATS = 10", newDBName, backupFilePath, moveClause, filePositionClause, recoveryOption)
 			} else {
 				// Последующие файлы (DIFF/TRN). MOVE не нужен.
 				switch file.Type {
-				case "LOG":
+				case "Transaction Log":
 					// LOG бэкап. 
-					restoreQuery = fmt.Sprintf("RESTORE LOG [%s] FROM DISK = N'%s' WITH %s%s, STATS = 10", newDBName, file.Path, recoveryOption, filePositionClause)
-				case "DIFF", "FULL": // DIFF/FULL, если они не первые (хотя DIFF должен быть вторым, а FULL всегда первым)
+					restoreQuery = fmt.Sprintf("RESTORE LOG [%s] FROM DISK = N'%s' WITH %s%s, STATS = 10", newDBName, backupFilePath, recoveryOption, filePositionClause)
+				case "Database Differential":
+					// Дифференциальный бэкап. Используем RESTORE DATABASE
+					restoreQuery = fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s' WITH %s%s, STATS = 10", newDBName, backupFilePath, recoveryOption, filePositionClause)
+				case "Database": // FULL, если он не первый
 					// Используем RESTORE DATABASE
-					restoreQuery = fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s' WITH %s%s, STATS = 10", newDBName, file.Path, recoveryOption, filePositionClause)
+					restoreQuery = fmt.Sprintf("RESTORE DATABASE [%s] FROM DISK = N'%s' WITH %s%s, STATS = 10", newDBName, backupFilePath, recoveryOption, filePositionClause)
 				}
 			}
 			
 			logging.LogDebug(fmt.Sprintf("Выполнение RESTORE (%d/%d): %s", i+1, len(filesToRestore), restoreQuery))
 			
 			if _, err := db.Exec(restoreQuery); err != nil {
-				logging.LogDebug(fmt.Sprintf("Прерывание RESTORE для %s (файл: %s, позиция: %d): %v", newDBName, file.Path, file.Position, err))
+				logging.LogDebug(fmt.Sprintf("Прерывание RESTORE для %s (файл: %s): %v", newDBName, backupFilePath, err))
 				// Обновляем статус на "failed", удаление БД будет выполнено в cancelRestoreProcess
 				RestoreProgressesMutex.Lock()
 				if progress != nil {
@@ -612,7 +556,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 		logging.LogInfo(fmt.Sprintf("Модель восстановления для базы данных '%s' изменена на SIMPLE.", newDBName))
 		
 		// Переводим базу в многопользовательский режим после завершения восстановления
-	if err := SetMultiUserMode(db, newDBName); err != nil {
+		if err := SetMultiUserMode(db, newDBName); err != nil {
 			logging.LogError(fmt.Sprintf("Ошибка перевода базы '%s' в многопользовательский режим после восстановления: %v", newDBName, err))
 			// Обновляем статус на "failed", несмотря на успешное восстановление
 			RestoreProgressesMutex.Lock()
@@ -686,7 +630,7 @@ func KillRestoreSession(db *sql.DB, dbName string) error {
 		SELECT r.session_id, t.text
 		FROM sys.dm_exec_requests r
 		CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
-	WHERE r.command LIKE '%RESTORE%'
+		WHERE r.command LIKE '%RESTORE%'
 		   OR r.status = 'suspended';
 	`
 	
@@ -707,7 +651,7 @@ func KillRestoreSession(db *sql.DB, dbName string) error {
 		// Проверяем, содержит ли текст команды имя целевой базы данных
 		if commandText.Valid && strings.Contains(commandText.String, fmt.Sprintf("DATABASE [%s]", dbName)) {
 			sessionIDsToKill = append(sessionIDsToKill, sessionID)
-		}
+	}
 	}
 
 	if len(sessionIDsToKill) == 0 {

@@ -21,18 +21,6 @@ type BackupLogicalFile struct {
 	Type        string // DATA, LOG
 }
 
-// Структура для хранения полной информации о файле бэкапа, полученной через RESTORE HEADERONLY
-type BackupFileSequence struct {
-	Path              string    // Полный ЛОКАЛЬНЫЙ путь к файлу
-	Type              string    // FULL, DIFF, LOG (конвертировано из D, I, L)
-	BackupFinishDate  time.Time // Время завершения бэкапа (более точное, чем из имени)
-	DatabaseName      string    // Имя базы данных из метаданных бэкапа
-	Position          int       // Позиция в файле бэкапа (если файл содержит несколько бэкапов)
-	FirstLSN          string    // First LSN
-	LastLSN           string    // Last LSN
-	DatabaseBackupLSN string    // Для DIFF бэкапов (Target LSN)
-}
-
 // restoreProgress - Структура для отслеживания прогресса восстановления
 type RestoreProgress struct {
 	TotalFiles    int       `json:"totalFiles"`
