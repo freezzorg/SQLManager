@@ -606,7 +606,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error(`Ошибка получения прогресса для ${dbName}:`, error);
-            addLogEntry(`ОШИБКА: Не удалось получить прогресс для базы '${dbName}': ${error.message}`);
+            // addLogEntry(`ОШИБКА: Не удалось получить прогресс для базы '${dbName}': ${error.message}`);
             if (activeRestorePollers[dbName]) {
                 clearInterval(activeRestorePollers[dbName]);
                 delete activeRestorePollers[dbName];
