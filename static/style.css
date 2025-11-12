@@ -129,7 +129,12 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 .input-group button { margin-left: auto; }
 .input-group input[type="text"] { width: calc(100% - 110px); }
 .input-group select, .input-group input[type="datetime-local"] { width: calc(100% - 110px); }
-#button-container { margin-top: auto; }
+#button-container {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
 #confirm-buttons { display: flex; gap: 5px; }
 #messages p { margin: 2px 0; line-height: 1.2; }
 .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 2s linear infinite; display: inline-block; flex-shrink: 0; margin-left: 5px; }
@@ -143,3 +148,12 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 .status-error { background-color: #9E9E9E; }
 .status-unknown { background-color: #2196F3; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+/* Стиль для смещения секции подтверждения ниже */
+#confirmation-section { margin-top: 20px; }
+
+/* Установка высоты списка дат окончания бэкапов кратной размеру шрифта и отступам */
+/* Используем атрибут size в HTML для управления количеством видимых строк */
+select#backup-end-times {
+    /* Высота определяется атрибутом size в HTML */
+}
