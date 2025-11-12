@@ -585,24 +585,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     const seconds = String(date.getSeconds()).padStart(2, '0');
                     
                     // Определяем тип бэкапа для отображения
-                    let backupType;
+                    let backupType, backupClass;
                     switch(item.Type) {
                         case "Database":
                             backupType = "Полный бэкап";
+                            backupClass = "backup-full";
                             break;
                         case "Database Differential":
                             backupType = "Дифференциальный бэкап";
+                            backupClass = "backup-diff";
                             break;
                         case "Transaction Log":
                             backupType = "Бэкап журналов транзакций";
+                            backupClass = "backup-trn";
                             break;
                         default:
                             backupType = item.Type;
+                            backupClass = "backup-unknown";
                     }
                     
                     option.value = formatDateTime(date, 'input');
                     option.textContent = `${day}.${month}.${year} ${hours}:${minutes}:${seconds}  - ${backupType}`;
-                    // option.textContent = `${day}.${month}.${year} ${hours}:${minutes}:${seconds}  - ${item.Type}`;
+                    option.className = backupClass;
                     backupEndTimesSelect.appendChild(option);
                 });
                 
