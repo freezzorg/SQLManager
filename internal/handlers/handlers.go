@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -354,6 +355,58 @@ func (h *AppHandlers) HandleGetLog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	logEntries := logging.GetBriefLog()
 	json.NewEncoder(w).Encode(logEntries)
+}
+
+// API для получения метаданных бэкапа
+func (h *AppHandlers) HandleGetBackupMetadata(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+
+	backupBaseName := r.URL.Query().Get("name")
+	if backupBaseName == "" {
+		http.Error(w, "Имя базы бэкапа не указано.", http.StatusBadRequest)
+		return
+	}
+	// Валидация backupBaseName
+	if !h.isValidBackupBaseName(backupBaseName) {
+		logging.LogWebError(fmt.Sprintf("Недопустимое имя базы бэкапа: %s", backupBaseName))
+		http.Error(w, "Недопустимое имя базы бэкапа.", http.StatusBadRequest)
+		return
+	}
+
+	mountPoint := h.AppConfig.SMBShare.LocalMountPoint
+	
+	// Проверяем и монтируем SMB-шару при необходимости
+	if err := utils.EnsureSMBMounted(mountPoint); err != nil {
+		logging.LogWebError(fmt.Sprintf("Не удалось смонтировать SMB-шару %s: %v", mountPoint, err))
+		http.Error(w, "Точка монтирования SMB-шары недоступна и не удалось смонтировать.", http.StatusInternalServerError)
+		return
+	}
+
+	// Формируем путь к директории бэкапа
+	backupDir := filepath.Join(mountPoint, backupBaseName)
+	
+	// Проверяем существование файла метаданных
+	metadataPath := filepath.Join(backupDir, "backup_metadata.json")
+	
+	// Проверяем существование файла метаданных
+	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+		http.Error(w, fmt.Sprintf("Файл метаданных %s не найден", metadataPath), http.StatusNotFound)
+		return
+	}
+	
+	// Читаем файл метаданных
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+	logging.LogWebError(fmt.Sprintf("Ошибка чтения файла метаданных %s: %v", metadataPath, err))
+		http.Error(w, fmt.Sprintf("Ошибка чтения файла метаданных: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }
 
 // isValidDBName - Простая валидация имени базы данных

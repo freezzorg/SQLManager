@@ -80,6 +80,7 @@ func startWebServer(db *sql.DB, appConfig *config.Config, addr string) {
     http.HandleFunc("/api/restore-progress", appHandlers.AuthMiddleware(appHandlers.HandleGetRestoreProgress))
     http.HandleFunc("/api/backup", appHandlers.AuthMiddleware(appHandlers.HandleStartBackup))
     http.HandleFunc("/api/backup-progress", appHandlers.AuthMiddleware(appHandlers.HandleGetBackupProgress))
+    http.HandleFunc("/api/backup-metadata", appHandlers.AuthMiddleware(appHandlers.HandleGetBackupMetadata))
 
     logging.LogInfo(fmt.Sprintf("Веб-сервер запущен на %s", addr))
     // Запускаем веб-сервер

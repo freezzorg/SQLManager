@@ -49,6 +49,15 @@
                             <button type="button" id="set-current-datetime-btn" class="now-btn" aria-label="Установить текущую дату и время">Сейчас</button>
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label for="backup-end-times">Доступные даты окончания бэкапов:</label>
+                        <div class="input-group">
+                            <select name="backupEndTimes" id="backup-end-times" multiple aria-label="Даты окончания бэкапов" size="5">
+                                <option value="" disabled selected>Выберите бэкап для отображения дат</option>
+                            </select>
+                            <button type="button" id="refresh-backup-times-btn" class="refresh-btn right" aria-label="Обновить список дат окончания бэкапов">Обновить</button>
+                        </div>
+                    </div>
                     <div id="confirmation-section" class="confirmation" style="display: none;" role="alert" aria-live="assertive">
                         <label>Внимание: База данных с таким именем уже существует. Вы уверены, что хотите перезаписать ее?</label>
                     </div>

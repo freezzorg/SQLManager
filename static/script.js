@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearDbNameBtn = document.getElementById('clear-db-name-btn');
     const restoreDatetimeInput = document.getElementById('restore-datetime');
     const setCurrentDatetimeBtn = document.getElementById('set-current-datetime-btn');
+    const backupEndTimesSelect = document.getElementById('backup-end-times');
+    const refreshBackupTimesBtn = document.getElementById('refresh-backup-times-btn');
     const restoreDbBtn = document.getElementById('restore-db-btn');
     const confirmRestoreButtons = document.getElementById('confirm-restore-buttons');
     const confirmRestoreBtn = document.getElementById('confirm-restore-btn');
@@ -500,6 +502,112 @@ document.addEventListener('DOMContentLoaded', () => {
         const now = new Date();
         restoreDatetimeInput.value = formatDateTime(now, 'input');
         restoreDatetimeInput.focus();
+    });
+
+    // Функция для загрузки и отображения дат окончания бэкапов
+    const loadBackupEndTimes = async (selectedBackup) => {
+        try {
+            const response = await makeApiRequest(`/api/backup-metadata?name=${encodeURIComponent(selectedBackup)}`);
+            
+            if (response.ok) {
+                const metadata = await response.json();
+                
+                // Очищаем текущий список
+                backupEndTimesSelect.innerHTML = '';
+                
+                // Сортируем метаданные по времени окончания в обратном порядке (от более свежих к более ранним)
+                metadata.sort((a, b) => new Date(b.End) - new Date(a.End));
+                
+                // Добавляем даты окончания в список
+                metadata.forEach(item => {
+                    const option = document.createElement('option');
+                    // Форматируем дату для отображения
+                    // Создаем объект Date, интерпретируя строку как локальное время
+                    const parts = item.End.split('T');
+                    const datePart = parts[0].split('-');
+                    const timePart = parts[1].split(':');
+                    const date = new Date(
+                        parseInt(datePart[0]), 
+                        parseInt(datePart[1]) - 1, 
+                        parseInt(datePart[2]), 
+                        parseInt(timePart[0]), 
+                        parseInt(timePart[1]), 
+                        parseInt(timePart[2])
+                    );
+                    option.value = formatDateTime(date, 'input');
+                    option.textContent = date.toLocaleString('ru-RU');
+                    backupEndTimesSelect.appendChild(option);
+                });
+                
+                if (metadata.length === 0) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'Нет доступных дат окончания';
+                    backupEndTimesSelect.appendChild(option);
+                }
+                
+                return true;
+            } else {
+                const errorText = await response.text();
+                console.error('Ошибка получения метаданных бэкапа:', errorText);
+                addLogEntry(`ОШИБКА: Не удалось получить метаданные бэкапа: ${errorText}`);
+                
+                // Добавляем сообщение об ошибке
+                backupEndTimesSelect.innerHTML = '';
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'Ошибка загрузки данных';
+                backupEndTimesSelect.appendChild(option);
+                
+                return false;
+            }
+        } catch (error) {
+            console.error('Ошибка при загрузке метаданных бэкапа:', error);
+            addLogEntry(`ОШИБКА: Сетевая ошибка при загрузке метаданных бэкапа: ${error.message}`);
+            
+            // Добавляем сообщение об ошибке
+            backupEndTimesSelect.innerHTML = '';
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'Ошибка загрузки данных';
+            backupEndTimesSelect.appendChild(option);
+            
+            return false;
+        }
+    };
+
+    // Обработчик выбора бэкапа - загружаем метаданные и формируем список дат окончания
+    backupSelect.addEventListener('change', async () => {
+        const selectedBackup = backupSelect.value;
+        
+        if (selectedBackup) {
+            await loadBackupEndTimes(selectedBackup);
+        } else {
+            // Если бэкап не выбран, очищаем список
+            backupEndTimesSelect.innerHTML = '<option value="" disabled selected>Выберите бэкап для отображения дат</option>';
+        }
+    });
+
+    // Обработчик выбора даты окончания бэкапа - устанавливаем значение в поле даты и времени
+    backupEndTimesSelect.addEventListener('change', () => {
+        const selectedEndTime = backupEndTimesSelect.value;
+        
+        if (selectedEndTime) {
+            // selectedEndTime уже в формате YYYY-MM-DDTHH:mm:ss, подходящем для поля datetime-local
+            // которое интерпретируется как локальное время
+            restoreDatetimeInput.value = selectedEndTime;
+        }
+    });
+
+    // Обработчик кнопки обновления списка дат окончания бэкапов
+    refreshBackupTimesBtn.addEventListener('click', async () => {
+        const selectedBackup = backupSelect.value;
+        
+        if (selectedBackup) {
+            await loadBackupEndTimes(selectedBackup);
+        } else {
+            alert('Пожалуйста, сначала выберите бэкап.');
+        }
     });
 
     // Обработчик отправки формы
