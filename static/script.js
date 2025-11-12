@@ -12,6 +12,47 @@ document.addEventListener('DOMContentLoaded', () => {
     const setCurrentDatetimeBtn = document.getElementById('set-current-datetime-btn');
     const backupEndTimesSelect = document.getElementById('backup-end-times');
     const refreshBackupTimesBtn = document.getElementById('refresh-backup-times-btn');
+
+    // Функция для фильтрации списка дат окончания бэкапов по выбранной дате
+    const filterBackupEndTimesByDate = (selectedDateStr) => {
+        if (!selectedDateStr) {
+            // Если дата не выбрана, показываем все даты
+            const options = backupEndTimesSelect.options;
+            for (let i = 0; i < options.length; i++) {
+                options[i].style.display = 'block';
+            }
+            return;
+        }
+
+        // Преобразуем строку даты в формат YYYY-MM-DD (берем только дату из datetime-local)
+        const selectedDate = selectedDateStr.split('T')[0];
+
+        const options = backupEndTimesSelect.options;
+        for (let i = 0; i < options.length; i++) {
+            const optionValue = options[i].value;
+            if (!optionValue) {
+                options[i].style.display = 'block'; // Показываем пустые опции
+                continue;
+            }
+            
+            // Берем только дату из значения опции
+            const optionDate = optionValue.split('T')[0];
+            
+            // Сравниваем даты (формат YYYY-MM-DD)
+            if (optionDate === selectedDate) {
+                options[i].style.display = 'block';
+            } else {
+                options[i].style.display = 'none';
+            }
+        }
+    };
+
+    // Обработчик изменения значения в поле даты/времени восстановления
+    restoreDatetimeInput.addEventListener('input', () => {
+        const selectedDateStr = restoreDatetimeInput.value;
+        filterBackupEndTimesByDate(selectedDateStr);
+    });
+
     const restoreDbBtn = document.getElementById('restore-db-btn');
     const confirmRestoreButtons = document.getElementById('confirm-restore-buttons');
     const confirmRestoreBtn = document.getElementById('confirm-restore-btn');
