@@ -139,7 +139,7 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 #messages p { margin: 2px 0; line-height: 1.2; }
 .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 2s linear infinite; display: inline-block; flex-shrink: 0; margin-left: 5px; }
 .header-spinner { margin-left: auto; }
-.confirmation { margin-top: 10px; padding: 10px; border: 1px solid #ffcc00; background-color: #fff3cd; color: #856404; display: flex; align-items: center; gap: 10px; }
+.confirmation { padding: 5px; border: 1px solid #ffcc00; background-color: #fff3cd; color: #856404; display: flex; align-items: center; gap: 10px; }
 .status-indicator { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 5px; flex-shrink: 0; }
 .status-online { background-color: #4CAF50; }
 .status-offline { background-color: #f44336; }
@@ -150,10 +150,10 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 /* Стиль для смещения секции подтверждения ниже */
-#confirmation-section { margin-top: 20px; }
+#confirmation-section { margin-bottom: 10px; }
 
 /* Установка высоты списка дат окончания бэкапов кратной размеру шрифта и отступам */
 /* Используем атрибут size в HTML для управления количеством видимых строк */
 select#backup-end-times {
-    /* Высота определяется атрибутом size в HTML */
+    height: 178px; /* Примерно 10 строк текста (16.8px * 10) плюс внутренние отступы (5px * 2) */
 }
