@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -617,4 +618,121 @@ func getAllBackupFiles(backupDir string) ([]string, error) {
 	}
 
 	return backupFiles, nil
+}
+
+// SyncBackupMetadata - Синхронизирует файл метаданных с файлами бэкапов в каталоге
+func SyncBackupMetadata(db *sql.DB, dbName, backupDir string) error {
+	logging.LogInfo(fmt.Sprintf("Начало синхронизации метаданных для базы '%s' в каталоге %s", dbName, backupDir))
+	
+	// Получаем список всех файлов бэкапов в каталоге
+	backupFiles, err := getAllBackupFiles(backupDir)
+	if err != nil {
+		return fmt.Errorf("ошибка получения списка файлов бэкапов: %w", err)
+	}
+	
+	logging.LogDebug(fmt.Sprintf("Найдено файлов бэкапов: %d", len(backupFiles)))
+	
+	// Путь к файлу метаданных
+	metadataPath := filepath.Join(backupDir, "backup_metadata.json")
+	
+	// Читаем существующие метаданные
+	var existingMetadata []BackupMetadata
+	if _, err := os.Stat(metadataPath); err == nil {
+		// Файл существует, читаем его
+		data, err := os.ReadFile(metadataPath)
+		if err != nil {
+			return fmt.Errorf("ошибка чтения файла метаданных: %w", err)
+		}
+		
+		if len(data) > 0 {
+			if err := json.Unmarshal(data, &existingMetadata); err != nil {
+				return fmt.Errorf("ошибка разбора JSON файла метаданных: %w", err)
+			}
+		}
+		logging.LogDebug(fmt.Sprintf("Прочитано существующих записей метаданных: %d", len(existingMetadata)))
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("ошибка проверки файла метаданных: %w", err)
+	} else {
+		logging.LogDebug("Файл метаданных не существует, будет создан новый")
+	}
+	
+	// Создаем мапу для быстрого поиска существующих метаданных по имени файла
+	metadataMap := make(map[string]*BackupMetadata)
+	for i := range existingMetadata {
+		metadataMap[existingMetadata[i].FileName] = &existingMetadata[i]
+	}
+	
+	// Проверяем каждый файл бэкапа
+	var updatedMetadata []BackupMetadata
+	for _, backupFile := range backupFiles {
+		backupFilePath := filepath.Join(backupDir, backupFile)
+		
+		// Проверяем, есть ли уже метаданные для этого файла
+		if existingMetadata, exists := metadataMap[backupFile]; exists {
+			// Проверяем, изменилось ли время модификации файла
+			fileInfo, err := os.Stat(backupFilePath)
+			if err != nil {
+				logging.LogError(fmt.Sprintf("Ошибка получения информации о файле %s: %v", backupFilePath, err))
+				continue
+			}
+			
+			// Если файл был изменен позже, чем время окончания бэкапа в метаданных, обновляем метаданные
+			if fileInfo.ModTime().After(existingMetadata.End.Time) {
+				logging.LogDebug(fmt.Sprintf("Файл %s был изменен, обновляем метаданные", backupFile))
+				newMetadata, err := getBackupHeaderInfo(db, backupFilePath)
+				if err != nil {
+					logging.LogError(fmt.Sprintf("Ошибка получения метаданных из файла %s: %v", backupFilePath, err))
+					continue
+				}
+				updatedMetadata = append(updatedMetadata, *newMetadata)
+			} else {
+				// Файл не изменялся, оставляем существующие метаданные
+				updatedMetadata = append(updatedMetadata, *existingMetadata)
+			}
+		} else {
+			// Новый файл, добавляем метаданные
+			logging.LogDebug(fmt.Sprintf("Найден новый файл бэкапа, добавляем метаданные для: %s", backupFile))
+			newMetadata, err := getBackupHeaderInfo(db, backupFilePath)
+			if err != nil {
+				logging.LogError(fmt.Sprintf("Ошибка получения метаданных из файла %s: %v", backupFilePath, err))
+				continue
+			}
+			updatedMetadata = append(updatedMetadata, *newMetadata)
+		}
+	}
+	
+	// Удаляем записи для файлов, которые больше не существуют
+	var finalMetadata []BackupMetadata
+	for _, metadata := range updatedMetadata {
+		backupFilePath := filepath.Join(backupDir, metadata.FileName)
+		if _, err := os.Stat(backupFilePath); err == nil {
+			// Файл существует, оставляем запись
+			finalMetadata = append(finalMetadata, metadata)
+		} else if os.IsNotExist(err) {
+			// Файл не существует, пропускаем запись
+			logging.LogDebug(fmt.Sprintf("Удалена устаревшая запись метаданных для файла: %s", metadata.FileName))
+		} else {
+			// Ошибка доступа к файлу, оставляем запись на всякий случай
+			logging.LogError(fmt.Sprintf("Ошибка проверки файла %s: %v", backupFilePath, err))
+			finalMetadata = append(finalMetadata, metadata)
+		}
+	}
+	
+	// Сортируем все метаданные по времени начала бэкапа
+	sort.Slice(finalMetadata, func(i, j int) bool {
+		return finalMetadata[i].Start.Before(finalMetadata[j].Start.Time)
+	})
+	
+	// Записываем обновленные метаданные обратно в файл
+	data, err := json.MarshalIndent(finalMetadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("ошибка сериализации метаданных в JSON: %w", err)
+	}
+	
+	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
+		return fmt.Errorf("ошибка записи файла метаданных: %w", err)
+	}
+	
+	logging.LogInfo(fmt.Sprintf("Файл метаданных синхронизирован для базы '%s', всего записей: %d", dbName, len(finalMetadata)))
+	return nil
 }

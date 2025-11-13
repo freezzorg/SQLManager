@@ -32,8 +32,8 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 	logging.LogWebInfo(fmt.Sprintf("Начато создание бэкапа базы '%s'...", dbName))
 
 	go func() {
+		// Всегда пытаемся перевести базу в многопользовательский режим после завершения бэкапа
 		defer func() {
-			// Всегда пытаемся перевести базу в многопользовательский режим после завершения бэкапа
 			if err := SetMultiUserMode(db, dbName); err != nil {
 				logging.LogError(fmt.Sprintf("Ошибка перевода базы '%s' в многопользовательский режим после бэкапа: %v", dbName, err))
 			}
@@ -109,28 +109,17 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 
 		// Обновляем метаданные бэкапа в отдельной горутине
 		go func() {
-			// Добавим небольшую задержку, чтобы убедиться, что файл бэкапа полностью записан
+			// Подождем немного, чтобы убедиться, что файл бэкапа полностью записан
 			// и соединение с базой данных освободилось от выполнения BACKUP
-			time.Sleep(5 * time.Second)
+			// time.Sleep(5 * time.Second)
 			
-			// Попробуем получить метаданные с повторными попытками
-			maxRetries := 3
-			for i := 0; i < maxRetries; i++ {
-				err := updateBackupMetadata(db, dbName, backupFilePath, backupDir)
-				if err == nil {
-					logging.LogInfo(fmt.Sprintf("Метаданные бэкапа успешно обновлены для базы '%s'", dbName))
-					return // Успешно завершаем горутину
-				}
-				
-				logging.LogError(fmt.Sprintf("Ошибка обновления метаданных бэкапа для базы '%s' (попытка %d): %v", dbName, i+1, err))
-				
-				if i < maxRetries-1 {
-					// Перед следующей попыткой подождем
-					time.Sleep(3 * time.Second)
-				}
+			// Вызываем синхронизацию всех метаданных в каталоге, которая обновит
+			// метаданные для всех файлов, включая только что созданный бэкап
+			if err := SyncBackupMetadata(db, dbName, backupDir); err != nil {
+				logging.LogError(fmt.Sprintf("Ошибка синхронизации метаданных бэкапа для базы '%s': %v", dbName, err))
+			} else {
+				logging.LogInfo(fmt.Sprintf("Метаданные бэкапа успешно синхронизированы для базы '%s'", dbName))
 			}
-			
-			logging.LogError(fmt.Sprintf("Не удалось обновить метаданные бэкапа для базы '%s' после %d попыток", dbName, maxRetries))
 		}()
 
 	}()
