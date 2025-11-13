@@ -41,14 +41,13 @@ func main() {
 
 // Устанавливает соединение с SQL Server
 func setupDBConnection(cfg struct {
-	Server   string `yaml:"server"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
+	Server   string    `yaml:"server"`
+	Port     int       `yaml:"port"`
+	User     string    `yaml:"user"`
+	Password string    `yaml:"password"`
 	RestorePath string `yaml:"restore_path"` 
 }) (*sql.DB, error) {
-	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d",
-		cfg.Server, cfg.User, cfg.Password, cfg.Port)
+	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d", cfg.Server, cfg.User, cfg.Password, cfg.Port)
 
     db, err := sql.Open("sqlserver", connString)
     if err != nil {

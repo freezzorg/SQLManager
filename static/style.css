@@ -157,24 +157,3 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 select#backup-end-times {
     height: 178px; /* Примерно 10 строк текста (16.8px * 10) плюс внутренние отступы (5px * 2) */
 }
-
-/* Стили для цветовой индикации типов бэкапов */
-.backup-full {
-    /*background-color: #e8f5e9 !important; /* Светло-зелёный фон для полного бэкапа */
-    color: #2e7d32 !important; /* Темно-зелёный текст */
-}
-
-.backup-diff {
-    /*background-color: #fff8e1 !important; /* Светло-жёлтый фон для дифференциального бэкапа */
-    color: #f57f17 !important; /* Темно-жёлтый/оранжевый текст */
-}
-
-.backup-trn {
-    /*background-color: #ffebee !important; /* Светло-красный фон для бэкапа транзакций */
-    color: #c62828 !important; /* Темно-красный текст */
-}
-
-.backup-unknown {
-    /*background-color: #f5f5f5 !important; /* Нейтральный фон для неизвестного типа */
-    color: #757575 !important; /* Серый текст */
-}

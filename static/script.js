@@ -589,19 +589,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     switch(item.Type) {
                         case "Database":
                             backupType = "Полный бэкап";
-                            // backupClass = "backup-full";
                             break;
                         case "Database Differential":
                             backupType = "Дифференциальный бэкап";
-                            // backupClass = "backup-diff";
                             break;
                         case "Transaction Log":
                             backupType = "Бэкап журналов транзакций";
-                            // backupClass = "backup-trn";
                             break;
                         default:
                             backupType = item.Type;
-                            // backupClass = "backup-unknown";
                     }
                     
                     option.value = formatDateTime(date, 'input');
