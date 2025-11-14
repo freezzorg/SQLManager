@@ -231,6 +231,36 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     };
 
+    // Функция для парсинга даты из формата маски (ДД.ММ.ГГГГ ЧЧ:ММ) в ISO формат
+    function parseAndValidateMaskedDateTime(maskedDateTime) {
+        // Проверяем формат ДД.ММ.ГГГГ ЧЧ:ММ
+        const regex = /^(\d{2})\.(\d{2})\.(\d{4})\s(\d{2}):(\d{2})$/;
+        const match = maskedDateTime.match(regex);
+        
+        if (!match) {
+            return null;
+        }
+        
+        const [, day, month, year, hour, minute] = match;
+        
+        // Проверяем валидность значений
+        const d = parseInt(day, 10);
+        const m = parseInt(month, 10);
+        const y = parseInt(year, 10);
+        const h = parseInt(hour, 10);
+        const min = parseInt(minute, 10);
+        
+        if (d < 1 || d > 31 || m < 1 || m > 12 || h < 0 || h > 23 || min < 0 || min > 59) {
+            return null;
+        }
+        
+        // Возвращаем дату в формате ISO (YYYY-MM-DD) и время (HH:MM)
+        return {
+            dateISO: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+            time: `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+        };
+    }
+
     const addLogEntry = (message) => {
         console.log(message);
         const li = document.createElement('li');
@@ -508,10 +538,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (restoreDateTime !== "") {
             try {
-                const dateObj = new Date(restoreDateTime);
+                // Преобразуем дату из формата маски в ISO строку для парсинга
+                const parsed = parseAndValidateMaskedDateTime(restoreDateTime);
+                if (!parsed) {
+                    throw new Error("Некорректный формат даты/времени");
+                }
+                
+                // Создаем объект Date из ISO строки
+                const dateObj = new Date(parsed.dateISO + 'T' + parsed.time + ':00');
                 if (isNaN(dateObj.getTime())) {
                     throw new Error("Некорректный формат даты/времени");
                 }
+                
                 formattedDateTime = formatDateTime(dateObj, 'backend');
 
             } catch (e) {
