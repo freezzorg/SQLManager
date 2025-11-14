@@ -45,7 +45,10 @@
                     <div class="form-group">
                         <label for="restore-datetime">Восстановить на дату и время:</label>
                         <div class="input-group">
-                            <input type="datetime-local" name="restoreDateTime" id="restore-datetime" step="1" aria-label="Дата и время для восстановления">
+                            <input type="text" name="restoreDateTime" id="restore-datetime" placeholder="ДД.ММ.ГГГГ ЧЧ:ММ" maxlength="16" aria-label="Дата и время для восстановления">
+                            <button type="button" id="datetime-picker-btn" class="calendar-btn" aria-label="Выбрать дату и время">
+                                <i class="fas fa-calendar-alt"></i>
+                            </button>
                             <button type="button" id="set-current-datetime-btn" class="now-btn" aria-label="Установить текущую дату и время">Сейчас</button>
                         </div>
                     </div>

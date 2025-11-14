@@ -1,57 +1,198 @@
 document.addEventListener('DOMContentLoaded', () => {
     const databaseList = document.getElementById('database-list');
     const deleteDbBtn = document.getElementById('delete-db-btn');
+    const backupDbBtn = document.getElementById('backup-db-btn');
     const refreshDbBtn = document.getElementById('refresh-db-btn');
-    const backupDbBtn = document.getElementById('backup-db-btn'); // Добавляем ссылку на кнопку "Бэкап"
-
+    
     const backupSelect = document.getElementById('backup-select');
     const refreshBackupsBtn = document.getElementById('refresh-backups-btn');
     const newDbNameInput = document.getElementById('new-db-name');
     const clearDbNameBtn = document.getElementById('clear-db-name-btn');
     const restoreDatetimeInput = document.getElementById('restore-datetime');
+    const datetimePickerBtn = document.getElementById('datetime-picker-btn');
     const setCurrentDatetimeBtn = document.getElementById('set-current-datetime-btn');
     const backupEndTimesSelect = document.getElementById('backup-end-times');
     const refreshBackupTimesBtn = document.getElementById('refresh-backup-times-btn');
 
-    // Функция для фильтрации списка дат окончания бэкапов по выбранной дате
-    const filterBackupEndTimesByDate = (selectedDateStr) => {
-        if (!selectedDateStr) {
-            // Если дата не выбрана, показываем все даты
-            const options = backupEndTimesSelect.options;
-            for (let i = 0; i < options.length; i++) {
-                options[i].style.display = 'block';
+    // Ограничения для ввода
+    const MIN_YEAR = 2000, MAX_YEAR = 2099;
+
+    function isLeapYear(year) {
+        return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+    }
+    function maxDaysInMonth(year, month) {
+        if (month < 1 || month > 12) return 31;
+        const days = [31, (isLeapYear(year)?29:28),31,30,31,30,31,31,30,31,30,31];
+        return days[month-1];
+    }
+
+    // МАСКА с ограничениями!
+    function formatAndValidate(value, setBorder=true) {
+        // Оставляем только цифры
+        const digits = value.replace(/\D/g, '');
+
+        let day = '', month = '', year = '', hour = '', minute = '';
+        let result = '';
+        let valid = true;
+
+        // day
+        if (digits.length > 0) {
+            day = digits.substring(0, 2);
+            // Ограничение на первую цифру дня
+            if (day.length === 1) {
+                if (day < '0' || day > '3') valid = false;
+            } else if (day.length === 2) {
+                let d = Number(day);
+                if (d < 1 || d > 31) valid = false;
             }
-            return;
+            result += day;
+        }
+        // month
+        if (digits.length >= 3) {
+            month = digits.substring(2, 4);
+            if (month.length === 1) {
+                if (month < '0' || month > '1') valid = false;
+            } else if (month.length === 2) {
+                let m = Number(month);
+                if (m < 1 || m > 12) valid = false;
+            }
+            result += '.' + month;
+        }
+        // year
+        if (digits.length >= 5) {
+            year = digits.substring(4, 8);
+            if (year.length > 0 && (Number(year)<MIN_YEAR || Number(year)>MAX_YEAR)) valid = false;
+            result += '.' + year;
+        }
+        // hour
+        if (digits.length >= 9) {
+            hour = digits.substring(8, 10);
+            if (hour.length === 2 && (Number(hour)<0 || Number(hour)>23)) valid = false;
+            result += ' ' + hour;
+        }
+        // minute
+        if (digits.length >= 11) {
+            minute = digits.substring(10, 12);
+            if (minute.length === 2 && (Number(minute)<0 || Number(minute)>59)) valid = false;
+            result += ':' + minute;
         }
 
-        // Преобразуем строку даты в формат YYYY-MM-DD (берем только дату из datetime-local)
-        const selectedDate = selectedDateStr.split('T')[0];
+        // Проверка на месяц/день после полного ввода
+        if (day.length === 2 && month.length === 2 && year.length === 4) {
+            if (valid) {
+                let d = Number(day), m = Number(month), y = Number(year);
+                if (d < 1 || d > maxDaysInMonth(y, m)) valid = false;
+            }
+        }
 
+        // Подсветка ошибки
+        if (setBorder) restoreDatetimeInput.style.borderColor = (valid||digits.length===0) ? '' : 'red';
+
+        return {formatted: result, digits, valid};
+    }
+
+    // Фильтрация по дню (одна цифра)
+    function filterBackupEndTimesByDayPrefix(dayPrefix) {
         const options = backupEndTimesSelect.options;
+        if (!dayPrefix) {
+            for (let i = 0; i < options.length; i++) options[i].style.display = 'block';
+            return;
+        }
         for (let i = 0; i < options.length; i++) {
-            const optionValue = options[i].value;
-            if (!optionValue) {
-                options[i].style.display = 'block'; // Показываем пустые опции
+            const val = options[i].value;
+            if (!val) {
+                options[i].style.display = 'block';
                 continue;
             }
-            
-            // Берем только дату из значения опции
-            const optionDate = optionValue.split('T')[0];
-            
-            // Сравниваем даты (формат YYYY-MM-DD)
-            if (optionDate === selectedDate) {
+            // Дата из значения
+            const optionDate = val.split('T')[0]; // format YYYY-MM-DD
+            // сравнение по дню
+            const optDay = optionDate.split('-')[2];
+            if (optDay.startsWith(dayPrefix)) {
                 options[i].style.display = 'block';
             } else {
                 options[i].style.display = 'none';
             }
         }
-    };
+    }
 
-    // Обработчик изменения значения в поле даты/времени восстановления
-    restoreDatetimeInput.addEventListener('input', () => {
-        const selectedDateStr = restoreDatetimeInput.value;
-        filterBackupEndTimesByDate(selectedDateStr);
+    // Основная фильтрация restore-datetime
+    restoreDatetimeInput.addEventListener('input', function(e) {
+        const {formatted, digits, valid} = formatAndValidate(e.target.value, true);
+        // Автоматически форматируем
+        e.target.value = formatted;
+
+        // ФИЛЬТРАЦИЯ:
+        if (digits.length === 1) {
+            // Фильтрация по первой цифре дня (например, 1 — 10..19)
+            filterBackupEndTimesByDayPrefix(digits);
+        } else if (digits.length >= 2) {
+            // Фильтр по полному дню
+            const now = new Date();
+            let month = now.getMonth()+1;
+            let year = now.getFullYear();
+            if (digits.length >= 4)  month = digits.substring(2,4);
+            if (digits.length >= 8)  year = digits.substring(4,8);
+            const day = digits.substring(0,2).padStart(2,'0');
+            const monthStr = String(month).padStart(2,'0');
+            const yearStr  = String(year);
+            const dateISO = `${yearStr}-${monthStr}-${day}`;
+            // Сравниваем по дате
+            const options = backupEndTimesSelect.options;
+            for (let i = 0; i < options.length; i++) {
+                const val = options[i].value;
+                if (!val) {
+                    options[i].style.display = 'block';
+                    continue;
+                }
+                const optionDate = val.split('T')[0];
+                if (optionDate == dateISO) {
+                    options[i].style.display = 'block';
+                } else {
+                    options[i].style.display = 'none';
+                }
+            }
+        } else {
+            // Нет дня — показывать все
+            filterBackupEndTimesByDayPrefix('');
+        }
     });
+
+    restoreDatetimeInput.addEventListener('keydown', (e) => {
+        const allowedKeys = [
+            'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Home', 'End'
+        ];
+        if (
+            allowedKeys.includes(e.key) ||
+            (e.ctrlKey || e.metaKey) ||
+            (e.key >= '0' && e.key <= '9')
+        ) return;
+        e.preventDefault();
+    });
+
+    restoreDatetimeInput.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text');
+        const digits = text.replace(/\D/g, '');
+        const {formatted} = formatAndValidate(digits, true);
+        restoreDatetimeInput.value = formatted;
+        restoreDatetimeInput.dispatchEvent(new Event('input'));
+    });
+
+    function setCurrentRestoreDateTimeToNow() {
+        const now = new Date();
+        const d = String(now.getDate()).padStart(2, '0');
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const y = now.getFullYear();
+        const h = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        const formattedDateTime = `${d}.${m}.${y} ${h}:${min}`;
+        restoreDatetimeInput.value = formattedDateTime;
+        restoreDatetimeInput.style.borderColor = '';
+        restoreDatetimeInput.focus();
+        restoreDatetimeInput.dispatchEvent(new Event('input'));
+    }
+    if (setCurrentDatetimeBtn) setCurrentDatetimeBtn.onclick = setCurrentRestoreDateTimeToNow;
 
     const restoreDbBtn = document.getElementById('restore-db-btn');
     const confirmRestoreButtons = document.getElementById('confirm-restore-buttons');
@@ -59,8 +200,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelConfirmRestoreBtn = document.getElementById('cancel-confirm-restore-btn');
 
     const briefLog = document.getElementById('brief-log');
-    const restoreForm = document.getElementById('restore-form'); // Добавляем ссылку на форму
-    const confirmationSection = document.getElementById('confirmation-section'); // Добавляем ссылку на секцию подтверждения
+    const restoreForm = document.getElementById('restore-form');
+    const confirmationSection = document.getElementById('confirmation-section');
 
     let selectedDatabase = null;
 
@@ -539,10 +680,69 @@ document.addEventListener('DOMContentLoaded', () => {
         newDbNameInput.value = '';
     });
 
+    // Обработчик кнопки "Сейчас" - устанавливает текущую дату и время
     setCurrentDatetimeBtn.addEventListener('click', () => {
         const now = new Date();
-        restoreDatetimeInput.value = formatDateTime(now, 'input');
+        // Преобразуем дату в формат, соответствующий маске ввода (ДД.ММ.ГГГГ ЧЧ:М)
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = now.getFullYear();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        
+        const formattedDateTime = `${day}.${month}.${year} ${hours}:${minutes}`;
+        restoreDatetimeInput.value = formattedDateTime;
         restoreDatetimeInput.focus();
+        
+        // Применяем фильтрацию
+        filterBackupEndTimesByDate(`${year}-${month}-${day}`);
+    });
+
+    // Обработчик кнопки выбора даты и времени
+    datetimePickerBtn.addEventListener('click', () => {
+        // Создаем элемент input[type="datetime-local"] для выбора даты и времени
+        const tempInput = document.createElement('input');
+        tempInput.type = 'datetime-local';
+        tempInput.style.position = 'absolute';
+        tempInput.style.left = '-9999px';
+        document.body.appendChild(tempInput);
+        
+        // Устанавливаем текущее значение, если оно есть
+        const currentValue = restoreDatetimeInput.value;
+        if (currentValue) {
+            // Преобразуем значение из формата маски в формат datetime-local
+            const parsed = parseAndValidateMaskedDateTime(currentValue);
+            if (parsed) {
+                const [year, month, day] = parsed.dateISO.split('-');
+                const [hours, minutes] = parsed.time.split(':');
+                const dtLocalValue = `${year}-${month}-${day}T${hours}:${minutes}`;
+                tempInput.value = dtLocalValue;
+            }
+        }
+        
+        // Открываем диалог выбора даты и времени
+        tempInput.focus();
+        tempInput.click();
+        
+        // После выбора даты и времени, обновляем основное поле
+        tempInput.addEventListener('change', function() {
+            const selectedValue = tempInput.value;
+            if (selectedValue) {
+                // Преобразуем выбранное значение в формат маски
+                const [datePart, timePart] = selectedValue.split('T');
+                const [year, month, day] = datePart.split('-');
+                const [hours, minutes] = timePart.split(':');
+                
+                const formattedDateTime = `${day}.${month}.${year} ${hours}:${minutes}`;
+                restoreDatetimeInput.value = formattedDateTime;
+                
+                // Применяем фильтрацию
+                filterBackupEndTimesByDate(`${year}-${month}-${day}`);
+            }
+            
+            // Удаляем временный элемент
+            document.body.removeChild(tempInput);
+        });
     });
 
     // Функция для загрузки и отображения дат окончания бэкапов
