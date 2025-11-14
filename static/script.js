@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
         time_24hr: true,
         allowInput: true,
         clickOpens: false,
+        locale: "ru",
         onChange: function(selectedDates, dateStr, instance) {
             if (selectedDates.length) {
                 const d = selectedDates[0];
