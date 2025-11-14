@@ -159,80 +159,63 @@ select#backup-end-times {
 }
 
 :root {
-  --fp-cell-width: 24px;
-  --fp-cell-height: 22px;
+  --fp-cell-width: 39px;
+  --fp-cell-height: 24px;
 }
 
-/* Обновляем базовые параметры */
 .flatpickr-calendar {
-    font-size: 13px !important;
-    width: calc(var(--fp-cell-width) * 7);
-    min-width: 0 !important;
-    background: #fffbf0 !important;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-    border-radius: 6px !important;
-    border: 1px solid #b3ac86 !important;
-    padding: 0 !important;
-    overflow: hidden !important;
+  font-size: 13px !important;
+  width: calc(var(--fp-cell-width) * 7) !important;
+  background: #fffbf0 !important;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08) !important;
+  border: 1px solid #b3ac86 !important;
+  border-radius: 6px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
 }
-.flatpickr-months,
-.flatpickr-months .flatpickr-month {
-    margin: 0 !important;
-    padding: 0 !important;
+
+.flatpickr-current-month .numInputWrapper {
+    margin-left: 10px;
 }
-.flatpickr-weekdays {
+
+.flatpickr-weekdays, .dayContainer {
     display: flex !important;
-    justify-content: flex-start;
-    background: #fffbf0 !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100%;
-}
-.flatpickr-weekday {
-    width: var(--fp-cell-width) !important;
-    height: var(--fp-cell-height) !important;
-    line-height: var(--fp-cell-height) !important;
-    text-align: center !important;
-    font-size: 12px !important;
-    color: #8a835c !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    box-sizing: border-box !important;
-}
-.dayContainer {
-    display: flex !important;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
     padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
 }
-.flatpickr-day {
-    width: var(--fp-cell-width) !important;
-    height: var(--fp-cell-height) !important;
-    line-height: var(--fp-cell-height) !important;
-    font-size: 13px !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    border-radius: 4px !important;
-    border: 1px solid transparent !important;
-    background: #fffbe6 !important;
-    color: #333 !important;
-    box-sizing: border-box !important;
-    text-align: center !important;
+
+.flatpickr-weekday, .flatpickr-day {
+  width: var(--fp-cell-width) !important;
+  height: var(--fp-cell-height) !important;
+  line-height: var(--fp-cell-height) !important;
+  text-align: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
 }
 
-/* Выделение текущего дня (.today) */
+.flatpickr-weekday {
+    font-size: 12px !important;
+    color: #8a835c !important;
+}
+
+.flatpickr-day {
+  font-size: 13px !important;
+  border-radius: 4px !important;
+  border: 1px solid transparent !important;
+  background: #fffbe6 !important;
+  color: #333 !important;
+}
+
 .flatpickr-day.today {
-    /* Более яркий фон для привлечения внимания */
-    background: #ffdf7e !important; 
-    color: #333 !important;
-    /* Контрастная рамка */
-    border: 1px solid #f9c735 !important; 
+    background: #ffdf7e !important;
+    border: 1px solid #f9c735 !important;
     font-weight: bold !important;
 }
 
-/* Стили для выбранного дня (если вдруг нужно, flatpickr использует .selected) */
 .flatpickr-day.selected {
     background: #71550c !important;
     color: #fff !important;

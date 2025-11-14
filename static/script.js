@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshBackupTimesBtn = document.getElementById('refresh-backup-times-btn');
 
     const fp = flatpickr("#restore-datetime", {
-        enableTime: true,
+        enableTime: false,
         enableSeconds: true,
         dateFormat: "d.m.Y H:i",
         time_24hr: true,
@@ -29,6 +29,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 restoreDatetimeInput.value = `${dateStr}:${sec}`;
                 restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true}));
             }
+        },
+        onReady: function(selectedDates, dateStr, instance) {
+            // Добавляем прокрутку колёсиком мыши для смены месяца
+            instance.calendarContainer.addEventListener("wheel", function(e) {
+                e.preventDefault();
+                if (e.deltaY < 0) {
+                    instance.changeMonth(-1); // прокрутка вверх — предыдущий месяц
+                } else {
+                    instance.changeMonth(1);  // прокрутка вниз — следующий месяц
+                }
+            });
         }
     });
 
@@ -38,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function isLeapYear(year) {
         return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
     }
+    
     function maxDaysInMonth(year, month) {
         if (month < 1 || month > 12) return 31;
         const days = [31, (isLeapYear(year)?29:28),31,30,31,30,31,31,30,31,30,31];
@@ -249,17 +261,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     };
 
-    // Функция для парсинга даты из формата маски (Д.ММ.ГГГГ ЧЧ:ММ) в ISO формат
+    // Функция для парсинга даты из формата маски (Д.ММ.ГГГГ ЧЧ:ММ[:СС]) в ISO формат
     function parseAndValidateMaskedDateTime(maskedDateTime) {
-        // Проверяем формат ДД.ММ.ГГГ ЧЧ:ММ
-        const regex = /^(\d{2})\.(\d{2})\.(\d{4})\s(\d{2}):(\d{2})$/;
+        // Проверяем формат ДД.ММ.ГГГГ ЧЧ:М:СС или ДД.ММ.ГГГГ ЧЧ:ММ
+        const regex = /^(\d{2})\.(\d{2})\.(\d{4})\s(\d{2}):(\d{2})(?::(\d{2}))?$/;
         const match = maskedDateTime.match(regex);
         
         if (!match) {
             return null;
         }
         
-        const [, day, month, year, hour, minute] = match;
+        const [, day, month, year, hour, minute, seconds] = match;
         
         // Проверяем валидность значений
         const d = parseInt(day, 10);
@@ -267,15 +279,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const y = parseInt(year, 10);
         const h = parseInt(hour, 10);
         const min = parseInt(minute, 10);
+        const sec = seconds ? parseInt(seconds, 10) : 0;
         
-        if (d < 1 || d > 31 || m < 1 || m > 12 || h < 0 || h > 23 || min < 0 || min > 59) {
+        if (d < 1 || d > 31 || m < 1 || m > 12 || h < 0 || h > 23 || min < 0 || min > 59 || sec < 0 || sec > 59) {
             return null;
         }
         
-        // Возвращаем дату в формате ISO (YYYY-MM-DD) и время (HH:MM)
+        // Возвращаем дату в формате ISO (YYYY-MM-DD) и время (HH:MM:SS)
         return {
             dateISO: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
-            time: `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+            time: `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
         };
     }
 
@@ -563,7 +576,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 // Создаем объект Date из ISO строки
-                const dateObj = new Date(parsed.dateISO + 'T' + parsed.time + ':00');
+                const dateObj = new Date(parsed.dateISO + 'T' + parsed.time);
                 if (isNaN(dateObj.getTime())) {
                     throw new Error("Некорректный формат даты/времени");
                 }
@@ -722,7 +735,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Обработчики событий ---
 
     refreshDbBtn.addEventListener('click', fetchDatabases);
+
     deleteDbBtn.addEventListener('click', () => deleteDatabase(selectedDatabase));
+
     backupDbBtn.addEventListener('click', () => {
         if (selectedDatabase) {
             startBackupProcess(selectedDatabase);
@@ -730,6 +745,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Пожалуйста, выберите базу данных для создания бэкапа.');
         }
     });
+
     refreshBackupsBtn.addEventListener('click', fetchBackups);
 
     clearDbNameBtn.addEventListener('click', () => {
@@ -945,6 +961,7 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmationSection.style.display = 'none';
         restoreDbBtn.style.display = 'block';
     });
+
     cancelConfirmRestoreBtn.addEventListener('click', () => {
         confirmRestoreButtons.style.display = 'none';
         confirmationSection.style.display = 'none';
