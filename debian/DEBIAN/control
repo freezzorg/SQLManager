@@ -1,11 +1,11 @@
 Package: sqlmanager
-Version: 1.4.7
+Version: 1.4.25
 Section: utils
 Priority: optional
 Architecture: amd64
 Depends: 
 Maintainer: KulikovVM
-Installed-Size: 7923
+Installed-Size: 7922
 Description: Web application for managing SQL Server databases
  SQLManager is a web application for managing SQL Server databases,
  allowing to perform restore and backup operations through a simple web interface.

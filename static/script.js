@@ -14,6 +14,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const backupEndTimesSelect = document.getElementById('backup-end-times');
     const refreshBackupTimesBtn = document.getElementById('refresh-backup-times-btn');
 
+    const fp = flatpickr("#restore-datetime", {
+        enableTime: true,
+        enableSeconds: true,
+        dateFormat: "d.m.Y H:i",
+        time_24hr: true,
+        allowInput: true,
+        clickOpens: false,
+        onChange: function(selectedDates, dateStr, instance) {
+            if (selectedDates.length) {
+                const d = selectedDates[0];
+                const sec = String(d.getSeconds()).padStart(2, '0');
+                restoreDatetimeInput.value = `${dateStr}:${sec}`;
+                restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true}));
+            }
+        }
+    });
+
     // Ограничения для ввода
     const MIN_YEAR = 2000, MAX_YEAR = 2099;
 
@@ -231,9 +248,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     };
 
-    // Функция для парсинга даты из формата маски (ДД.ММ.ГГГГ ЧЧ:ММ) в ISO формат
+    // Функция для парсинга даты из формата маски (Д.ММ.ГГГГ ЧЧ:ММ) в ISO формат
     function parseAndValidateMaskedDateTime(maskedDateTime) {
-        // Проверяем формат ДД.ММ.ГГГГ ЧЧ:ММ
+        // Проверяем формат ДД.ММ.ГГГ ЧЧ:ММ
         const regex = /^(\d{2})\.(\d{2})\.(\d{4})\s(\d{2}):(\d{2})$/;
         const match = maskedDateTime.match(regex);
         
@@ -554,7 +571,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } catch (e) {
                 console.error("Ошибка форматирования даты:", e);
-                addLogEntry(`ОШИБКА: Не удалось обработать дату/время: ${restoreDateTime}. Убедитесь, что формат: ГГГГ-М-ДДТЧЧ:ММ:СС`);
+                addLogEntry(`ОШИБКА: Не удалось обработать дату/время: ${restoreDateTime}. Убедитесь, что формат: ГГГГ-М-ДДТЧ:ММ:СС`);
                 return;
             }
         }
@@ -718,6 +735,11 @@ document.addEventListener('DOMContentLoaded', () => {
         newDbNameInput.value = '';
     });
 
+    // При клике по кнопке календаря — открываем скрытый input
+    datetimePickerBtn.addEventListener('click', function() {
+        fp.open();
+    });
+
     // Обработчик кнопки "Сейчас" - устанавливает текущую дату и время
     setCurrentDatetimeBtn.addEventListener('click', () => {
         const now = new Date();
@@ -727,60 +749,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const year = now.getFullYear();
         const hours = String(now.getHours()).padStart(2, '0');
         const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
         
-        const formattedDateTime = `${day}.${month}.${year} ${hours}:${minutes}`;
+        const formattedDateTime = `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
         restoreDatetimeInput.value = formattedDateTime;
         restoreDatetimeInput.focus();
-        
-        // Применяем фильтрацию
-        filterBackupEndTimesByDate(`${year}-${month}-${day}`);
-    });
-
-    // Обработчик кнопки выбора даты и времени
-    datetimePickerBtn.addEventListener('click', () => {
-        // Создаем элемент input[type="datetime-local"] для выбора даты и времени
-        const tempInput = document.createElement('input');
-        tempInput.type = 'datetime-local';
-        tempInput.style.position = 'absolute';
-        tempInput.style.left = '-9999px';
-        document.body.appendChild(tempInput);
-        
-        // Устанавливаем текущее значение, если оно есть
-        const currentValue = restoreDatetimeInput.value;
-        if (currentValue) {
-            // Преобразуем значение из формата маски в формат datetime-local
-            const parsed = parseAndValidateMaskedDateTime(currentValue);
-            if (parsed) {
-                const [year, month, day] = parsed.dateISO.split('-');
-                const [hours, minutes] = parsed.time.split(':');
-                const dtLocalValue = `${year}-${month}-${day}T${hours}:${minutes}`;
-                tempInput.value = dtLocalValue;
-            }
-        }
-        
-        // Открываем диалог выбора даты и времени
-        tempInput.focus();
-        tempInput.click();
-        
-        // После выбора даты и времени, обновляем основное поле
-        tempInput.addEventListener('change', function() {
-            const selectedValue = tempInput.value;
-            if (selectedValue) {
-                // Преобразуем выбранное значение в формат маски
-                const [datePart, timePart] = selectedValue.split('T');
-                const [year, month, day] = datePart.split('-');
-                const [hours, minutes] = timePart.split(':');
-                
-                const formattedDateTime = `${day}.${month}.${year} ${hours}:${minutes}`;
-                restoreDatetimeInput.value = formattedDateTime;
-                
-                // Применяем фильтрацию
-                filterBackupEndTimesByDate(`${year}-${month}-${day}`);
-            }
-            
-            // Удаляем временный элемент
-            document.body.removeChild(tempInput);
-        });
     });
 
     // Функция для загрузки и отображения дат окончания бэкапов
@@ -896,11 +869,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Обработчик выбора даты окончания бэкапа - устанавливаем значение в поле даты и времени
     backupEndTimesSelect.addEventListener('change', () => {
         const selectedEndTime = backupEndTimesSelect.value;
-        
         if (selectedEndTime) {
-            // selectedEndTime уже в формате YYYY-MM-DDTHH:mm:ss, подходящем для поля datetime-local
-            // которое интерпретируется как локальное время
-            restoreDatetimeInput.value = selectedEndTime;
+            // Ожидаемый формат: YYYY-MM-DDTHH:MM:SS
+            const [date, time] = selectedEndTime.split('T');
+            const [yyyy, mm, dd] = date.split('-');
+            const [hh, min, sec] = time.split(':');
+            restoreDatetimeInput.value = `${dd}.${mm}.${yyyy} ${hh}:${min}:${sec}`;
+            restoreDatetimeInput.style.borderColor = '';
+            for (let i = 0; i < backupEndTimesSelect.options.length; i++) {
+                if (backupEndTimesSelect.options[i].value === selectedEndTime) {
+                    backupEndTimesSelect.options[i].style.display = 'block';
+                } else {
+                    backupEndTimesSelect.options[i].style.display = 'none';
+                }
+            }
         }
     });
 
