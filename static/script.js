@@ -14,23 +14,146 @@ document.addEventListener('DOMContentLoaded', () => {
     const backupEndTimesSelect = document.getElementById('backup-end-times');
     const refreshBackupTimesBtn = document.getElementById('refresh-backup-times-btn');
 
-    const fp = flatpickr("#restore-datetime", {
+    const mask = '__.__.____ __:__:__';
+    const editablePositions = [];
+    for (let i = 0; i < mask.length; i++) {
+        if (mask[i] === '_') editablePositions.push(i);
+    }
+    const originalInputValue = restoreDatetimeInput.value;
+    restoreDatetimeInput.value = "";
+
+    function setCaretPosition(elem, pos) {
+        window.requestAnimationFrame(() => elem.setSelectionRange(pos, pos));
+    }
+
+    function isEditablePosition(pos) {
+        return editablePositions.includes(pos);
+    }
+
+    function findNextEditablePosition(pos) {
+        for (let i = 0; i < editablePositions.length; i++) {
+            if (editablePositions[i] > pos) return editablePositions[i];
+        }
+        return editablePositions[editablePositions.length - 1] + 1;
+    }
+
+    function findPrevEditablePosition(pos) {
+        for (let i = editablePositions.length - 1; i >= 0; i--) {
+            if (editablePositions[i] < pos) return editablePositions[i];
+        }
+        return -1;
+    }
+
+    // Проверка корректности вводимого символа по позиции
+    function validateCharAtPos(valueArr, pos, char) {
+        // Копируем массив и вставляем символ
+        let testArr = valueArr.slice();
+        testArr[pos] = char;
+
+        function isDigit(c) {
+            return /\d/.test(c);
+        }
+
+        // Проверка по позициям:
+        // день: pos 0 и 1
+        if (pos === 0) {
+            // Первая цифра дня: 0..3
+            if (char < '0' || char > '3') return false;
+        } else if (pos === 1) {
+            // Вторая цифра дня зависит от первой
+            const first = testArr[0];
+            if (!isDigit(first)) return false;
+            if (first === '3') {
+                if (char < '0' || char > '1') return false;
+            } else {
+                if (char < '0' || char > '9') return false;
+            }
+        }
+
+        // месяц: pos 3 и 4
+        if (pos === 3) {
+            // Первая цифра месяца: 0..1
+            if (char < '0' || char > '1') return false;
+        } else if (pos === 4) {
+            // Вторая цифра месяца зависит от первой
+            const first = testArr[3];
+            if (!isDigit(first)) return false;
+            if (first === '1') {
+                if (char < '0' || char > '2') return false;
+            } else {
+                if (char < '0' || char > '9') return false;
+            }
+        }
+
+        // год: pos 6,7,8,9 - позволим вводить 2000-2099 строго на 6 и 7 позиции
+        if (pos === 6) {
+            if (char !== '2') return false; // первый символ года всегда 2
+        }
+        if (pos === 7) {
+            if (char !== '0') return false; // второй символ года всегда 0
+        }
+        if (pos === 8) {
+            if (char < '0' || char > '9') return false;
+        }
+        if (pos === 9) {
+            if (char < '0' || char > '9') return false;
+        }
+
+        // часы: pos 11,12
+        if (pos === 11) {
+            if (char < '0' || char > '2') return false;
+        } else if (pos === 12) {
+            const first = testArr[11];
+            if (!isDigit(first)) return false;
+            if (first === '2') {
+                if (char < '0' || char > '3') return false;
+            } else {
+                if (char < '0' || char > '9') return false;
+            }
+        }
+
+        // минуты: pos 14,15
+        if (pos === 14) {
+            if (char < '0' || char > '5') return false;
+        } else if (pos === 15) {
+            if (char < '0' || char > '9') return false;
+        }
+
+        // секунды: pos 17,18
+        if (pos === 17) {
+            if (char < '0' || char > '5') return false;
+        } else if (pos === 18) {
+            if (char < '0' || char > '9') return false;
+        }
+
+        return true;
+    }
+
+    const fp = flatpickr(restoreDatetimeInput, {
         enableTime: false,
-        enableSeconds: true,
-        dateFormat: "d.m.Y H:i",
+        enableSeconds: false,
+        dateFormat: "d.m.Y H:i:S",
         time_24hr: true,
         allowInput: true,
         clickOpens: false,
+        defaultDate: "",
         locale: "ru",
         onChange: function(selectedDates, dateStr, instance) {
             if (selectedDates.length) {
-                const d = selectedDates[0];
-                const sec = String(d.getSeconds()).padStart(2, '0');
-                restoreDatetimeInput.value = `${dateStr}:${sec}`;
+                // dateStr уже будет в формате "дд.мм.гггг чч:мм:сс"
+                restoreDatetimeInput.value = dateStr;
                 restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true}));
+            } else {
+                // Если дата не выбрана, восстановить маску
+                if (!restoreDatetimeInput.value || restoreDatetimeInput.value.replace(/_/g, '').trim().length === 0) {
+                    restoreDatetimeInput.value = mask;
+                }
             }
         },
         onReady: function(selectedDates, dateStr, instance) {
+            if (restoreDatetimeInput.value === "") {
+                restoreDatetimeInput.value = originalInputValue;
+            }
             // Добавляем прокрутку колёсиком мыши для смены месяца
             instance.calendarContainer.addEventListener("wheel", function(e) {
                 e.preventDefault();
@@ -61,7 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Оставляем только цифры
         const digits = value.replace(/\D/g, '');
 
-        let day = '', month = '', year = '', hour = '', minute = '';
+        let day = '', month = '', year = '', hour = '', minute = '', second = '';
         let result = '';
         let valid = true;
 
@@ -106,6 +229,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (minute.length === 2 && (Number(minute)<0 || Number(minute)>59)) valid = false;
             result += ':' + minute;
         }
+        // second
+        if (digits.length >= 13) {
+            second = digits.substring(12, 14);
+            if (second.length === 2 && (Number(second)<0 || Number(second)>59)) valid = false;
+            result += ':' + second;
+        }
 
         // Проверка на месяц/день после полного ввода
         if (day.length === 2 && month.length === 2 && year.length === 4) {
@@ -120,6 +249,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return {formatted: result, digits, valid};
     }
+
+    // Инициализация поля ввода маской
+    restoreDatetimeInput.value = mask;
 
     // Фильтрация по дню (одна цифра)
     function filterBackupEndTimesByDayPrefix(dayPrefix) {
@@ -148,9 +280,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Основная фильтрация restore-datetime
     restoreDatetimeInput.addEventListener('input', function(e) {
-        const {formatted, digits, valid} = formatAndValidate(e.target.value, true);
-        // Автоматически форматируем
-        e.target.value = formatted;
+        // Здесь мы не форматируем, так как маска уже делает это
+        // const {formatted, digits, valid} = formatAndValidate(e.target.value, true);
+        // e.target.value = formatted;
+
+        // Для фильтрации нам нужны только цифры
+        const digits = e.target.value.replace(/\D/g, '');
 
         // ФИЛЬТРАЦИЯ:
         if (digits.length === 1) {
@@ -188,25 +323,146 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    restoreDatetimeInput.addEventListener('keydown', (e) => {
-        const allowedKeys = [
-            'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Home', 'End'
-        ];
-        if (
-            allowedKeys.includes(e.key) ||
-            (e.ctrlKey || e.metaKey) ||
-            (e.key >= '0' && e.key <= '9')
-        ) return;
-        e.preventDefault();
+    restoreDatetimeInput.addEventListener('focus', () => {
+        if (!restoreDatetimeInput.value || restoreDatetimeInput.value === '') restoreDatetimeInput.value = mask;
+        let pos = restoreDatetimeInput.value.indexOf('_');
+        if (pos === -1) pos = mask.length;
+        setCaretPosition(restoreDatetimeInput, pos);
     });
 
+    restoreDatetimeInput.addEventListener('keydown', (e) => {
+        const pos = restoreDatetimeInput.selectionStart;
+
+        if (e.key === 'Backspace') {
+            e.preventDefault();
+
+            let deletePos = pos - 1;
+            while (deletePos >= 0 && !isEditablePosition(deletePos)) {
+                deletePos--;
+            }
+            if (deletePos < 0) return;
+
+            let valueArr = restoreDatetimeInput.value.split('');
+            valueArr[deletePos] = '_';
+            restoreDatetimeInput.value = valueArr.join('');
+            setCaretPosition(restoreDatetimeInput, deletePos);
+            restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true})); // Для обновления фильтрации
+        } else if (e.key === 'Delete') {
+            e.preventDefault();
+
+            let deletePos = pos;
+            while (deletePos < mask.length && !isEditablePosition(deletePos)) {
+                deletePos++;
+            }
+            if (deletePos >= mask.length) return;
+
+            let valueArr = restoreDatetimeInput.value.split('');
+            valueArr[deletePos] = '_';
+            restoreDatetimeInput.value = valueArr.join('');
+            
+            let newCaretPos = pos;
+            // Проверяем, находится ли следующая позиция после удаленного символа разделителем
+            if (deletePos + 1 < mask.length && !isEditablePosition(deletePos + 1)) {
+                newCaretPos = pos + 2; // Перемещаем курсор за разделитель
+            } else {
+                newCaretPos = pos + 1; // Обычное смещение на 1
+            }
+            setCaretPosition(restoreDatetimeInput, newCaretPos);
+            restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true})); // Для обновления фильтрации
+        } else if (e.key.length === 1 && /\d/.test(e.key)) {
+            e.preventDefault();
+
+            let insertPos = pos;
+            if (!isEditablePosition(insertPos)) {
+                insertPos = findNextEditablePosition(insertPos);
+            }
+            if (insertPos >= mask.length) return;
+
+            let valueArr = restoreDatetimeInput.value.split('');
+            if (!validateCharAtPos(valueArr, insertPos, e.key)) {
+                // Невалидный ввод, пропускаем
+                return;
+            }
+
+            valueArr[insertPos] = e.key;
+            restoreDatetimeInput.value = valueArr.join('');
+
+            let nextPos = findNextEditablePosition(insertPos);
+            if (nextPos > mask.length) nextPos = mask.length;
+            setCaretPosition(restoreDatetimeInput, nextPos);
+            restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true})); // Для обновления фильтрации
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            let newPos = pos - 1;
+            while (newPos >= 0 && !isEditablePosition(newPos)) {
+                newPos--;
+            }
+            if (newPos < 0) newPos = findNextEditablePosition(-1); // Переход к первой редактируемой позиции
+            setCaretPosition(restoreDatetimeInput, newPos);
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            let newPos = pos + 1;
+            while (newPos < mask.length && !isEditablePosition(newPos)) {
+                newPos++;
+            }
+            if (newPos >= mask.length) newPos = findPrevEditablePosition(mask.length); // Переход к последней редактируемой позиции
+            setCaretPosition(restoreDatetimeInput, newPos);
+        } else if (
+            e.key === 'Tab' || e.key === 'Home' || e.key === 'End' ||
+            (e.ctrlKey || e.metaKey) // Разрешаем Ctrl/Cmd + A, C, V, X
+        ) {
+            return;
+        } else {
+            e.preventDefault();
+        }
+    });
+
+    restoreDatetimeInput.addEventListener('click', () => {
+        let pos = restoreDatetimeInput.selectionStart;
+        if (!isEditablePosition(pos)) {
+            let next = findNextEditablePosition(pos);
+            if (next >= mask.length) next = pos;
+            setCaretPosition(restoreDatetimeInput, next);
+        }
+    });
+
+    restoreDatetimeInput.addEventListener('blur', () => {
+        if (!restoreDatetimeInput.value || restoreDatetimeInput.value.replace(/_/g, '').trim().length === 0) {
+            restoreDatetimeInput.value = mask;
+        }
+        restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true})); // Для обновления фильтрации
+    });
+
+    // Обработчик paste для restoreDatetimeInput
     restoreDatetimeInput.addEventListener('paste', (e) => {
         e.preventDefault();
         const text = (e.clipboardData || window.clipboardData).getData('text');
         const digits = text.replace(/\D/g, '');
-        const {formatted} = formatAndValidate(digits, true);
-        restoreDatetimeInput.value = formatted;
-        restoreDatetimeInput.dispatchEvent(new Event('input'));
+        
+        let valueArr = mask.split('');
+        let digitIndex = 0;
+        for (let i = 0; i < editablePositions.length; i++) {
+            const pos = editablePositions[i];
+            if (digitIndex < digits.length) {
+                const char = digits[digitIndex];
+                if (validateCharAtPos(valueArr, pos, char)) {
+                    valueArr[pos] = char;
+                    digitIndex++;
+                } else {
+                    // Если символ невалиден, прекращаем вставку
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        restoreDatetimeInput.value = valueArr.join('');
+        restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true})); // Для обновления фильтрации
+        
+        // Устанавливаем каретку на следующую редактируемую позицию
+        let nextPos = findNextEditablePosition(editablePositions[digitIndex - 1] || -1);
+        if (nextPos > mask.length) nextPos = mask.length;
+        setCaretPosition(restoreDatetimeInput, nextPos);
     });
 
     function setCurrentRestoreDateTimeToNow() {
@@ -216,12 +472,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const y = now.getFullYear();
         const h = String(now.getHours()).padStart(2, '0');
         const min = String(now.getMinutes()).padStart(2, '0');
-        const formattedDateTime = `${d}.${m}.${y} ${h}:${min}`;
+        const s = String(now.getSeconds()).padStart(2, '0');
+        
+        const formattedDateTime = `${d}.${m}.${y} ${h}:${min}:${s}`;
         restoreDatetimeInput.value = formattedDateTime;
         restoreDatetimeInput.style.borderColor = '';
         restoreDatetimeInput.focus();
-        restoreDatetimeInput.dispatchEvent(new Event('input'));
+        restoreDatetimeInput.dispatchEvent(new Event('input', {bubbles:true})); // Для обновления фильтрации
     }
+    
     if (setCurrentDatetimeBtn) setCurrentDatetimeBtn.onclick = setCurrentRestoreDateTimeToNow;
 
     const restoreDbBtn = document.getElementById('restore-db-btn');
@@ -754,7 +1013,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // При клике по кнопке календаря — открываем скрытый input
     datetimePickerBtn.addEventListener('click', function() {
-        fp.open();
+        if (fp) {
+            fp.open();
+        }
     });
 
     // Обработчик кнопки "Сейчас" - устанавливает текущую дату и время
