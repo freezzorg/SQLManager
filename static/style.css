@@ -2,9 +2,9 @@ body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: 
 #container { display: flex; flex-direction: column; width: 100%; margin: 0 auto; height: 100vh; } /* Ширина 100%, высота 100vh */
 #main { display: flex; flex: 1; }
 #left-frame, #right-frame { border: 1px solid #b3ac86; border-radius: 5px; background-color: #fffbf0; margin: 5px; padding: 10px; } /* Цвет бордюра и цвет фона фреймов */
-#left-frame { width: 450px; flex-shrink: 0; height: calc(60vh - 10px); display: flex; flex-direction: column; overflow-x: hidden; } /* Увеличена ширина и высота */
-#right-frame { width: calc(100% - 450px); flex-grow: 1; height: calc(60vh - 10px); display: flex; flex-direction: column; } /* Увеличена высота, ширина подстраивается */
-#bottom-frame { height: calc(40vh - 10px); border: 1px solid #b3ac86; border-radius: 5px; background-color: #fffbf0; margin: 5px; padding: 10px; overflow-y: auto; } /* Цвет бордюра и цвет фона фреймов */
+#left-frame { width: 450px; flex-shrink: 0; height: 440px; display: flex; flex-direction: column; overflow-x: hidden; } /* Фиксированная высота */
+#right-frame { width: calc(100% - 450px); flex-grow: 1; height: 440px; display: flex; flex-direction: column; } /* Фиксированная высота */
+#bottom-frame { flex: 1; border: 1px solid #b3ac86; border-radius: 5px; background-color: #fffbf0; margin: 5px; padding: 10px; overflow-y: auto; } /* Цвет бордюра и цвет фона фреймов, динамическая высота */
 h2 { margin: 0 0 20px 0; font-weight: bold; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
 ul { list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
 li { 
@@ -89,6 +89,7 @@ li.selected { background-color: #d1e7ff; }
     flex-shrink: 0;
     height: auto;
 }
+
 .cancel-restore-btn-inline:hover {
     background-color: #da190b;
 }
@@ -97,7 +98,17 @@ li.selected { background-color: #d1e7ff; }
 .button-fixed-width-100 { width: 100px; }
 .button-half-width { width: calc(50% - 2.5px); }
 
-button { padding: 5px 10px; border: 1px solid #b3ac86; border-radius: 3px; cursor: pointer; height: 30px; box-sizing: border-box; background-color: #f5f2dd; color: black; } /* Цвета кнопок в стиле 1С 8.2 */
+button {
+    padding: 5px 10px;
+    border: 1px solid #b3ac86;
+    border-radius: 3px;
+    cursor: pointer;
+    height: 30px;
+    box-sizing: border-box;
+    background-color: #f5f2dd;
+    color: black;
+}
+
 .refresh-btn { background-color: #f5f2dd; color: black; border: 1px solid #b3ac86; }
 .refresh-btn.left { width: calc(50% - 2.5px); }
 .refresh-btn.right { width: 100px; }
@@ -150,13 +161,7 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 /* Стиль для смещения секции подтверждения ниже */
-#confirmation-section { margin-bottom: 10px; }
-
-/* Установка высоты списка дат окончания бэкапов кратной размеру шрифта и отступам */
-/* Используем атрибут size в HTML для управления количеством видимых строк */
-select#backup-end-times {
-    height: 178px; /* Примерно 10 строк текста (16.8px * 10) плюс внутренние отступы (5px * 2) */
-}
+#confirmation-section { margin-bottom: 10px; min-height: 20px; } /* Устанавливаем минимальную высоту для двух строк */
 
 :root {
   --fp-cell-width: 39px;
