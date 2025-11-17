@@ -169,7 +169,7 @@ func loadUserMessagesToFullHistoryLog(logFilePath string) {
             timestampStr := parts[0] + " " + parts[1]
             message := parts[2]
 
-            timestamp, err := time.Parse("2006-01-02 15:04:05", timestampStr)
+            timestamp, err := time.Parse("2006/01/02 15:04:05", timestampStr)
             if err != nil {
                 continue
             }

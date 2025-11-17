@@ -160,6 +160,20 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 .status-unknown { background-color: #2196F3; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
+/* Добавляем определение для fa-spin анимации */
+.fa-spin {
+  animation: fa-spin 2s infinite linear;
+}
+
+@keyframes fa-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
 /* Стиль для смещения секции подтверждения ниже */
 #confirmation-section { margin-bottom: 10px; min-height: 20px; } /* Устанавливаем минимальную высоту для двух строк */
 

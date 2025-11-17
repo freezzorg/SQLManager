@@ -214,9 +214,11 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 	go func(ctx context.Context, cancel context.CancelFunc) { // Передаем контекст и функцию отмены
 		defer cancel() // Гарантируем вызов cancel при завершении горутины
 
-		logging.LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
 		if restoreTime != nil {
+			logging.LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s' на %s", newDBName, backupBaseName, restoreTime.Format("2006-01-02 15:04:05")))
 			logging.LogDebug(fmt.Sprintf("Желаемое время восстановления (PIRT): %s", restoreTime.Format("2006-01-02 15:04:05")))
+		} else {
+			logging.LogWebInfo(fmt.Sprintf("Начато асинхронное восстановление базы '%s' из бэкапа '%s'.", newDBName, backupBaseName))
 		}
 
 		// Обновляем статус на "in_progress"
