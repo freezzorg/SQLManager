@@ -1,5 +1,5 @@
 Package: sqlmanager
-Version: 1.5.3
+Version: 1.5.5
 Section: utils
 Priority: optional
 Architecture: amd64

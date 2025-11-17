@@ -16,7 +16,6 @@ var fileLogger *log.Logger
 var userMessageLogger *log.Logger
 var currentLogLevel int // 0: ERROR, 1: INFO, 2: DEBUG
 var logMutex sync.Mutex // Мьютекс для безопасной записи в лог-файл
-var briefLog []config.LogEntry // Краткий лог для веб-интерфейса (последние 50 сообщений)
 var fullHistoryLog []config.LogEntry // Полная история сообщений для веб-интерфейса (до 500 сообщений)
 
 func SetupLogger(logFile string, level string) {
@@ -50,13 +49,14 @@ func SetupLogger(logFile string, level string) {
     if err != nil {
         log.Fatalf("Не удалось открыть файл логов сообщений пользователю: %v", err)
     }
-    userMessageLogger = log.New(userMessageFile, "", log.Ldate|log.Ltime)
+    // Создаем логгер без автоматической даты/времени, чтобы записывать их вручную
+    userMessageLogger = log.New(userMessageFile, "", 0) // Убираем флаги даты/времени
     
-    // Загружаем существующие сообщения пользователю в briefLog при запуске
-    loadUserMessagesToBriefLog(userMessageLogFile)
+    // Загружаем существующие сообщения пользователю в fullHistoryLog при запуске
+    loadUserMessagesToFullHistoryLog(userMessageLogFile)
 }
 
-// Запись в краткий лог (для веб-интерфейса)
+// Запись в лог (для веб-интерфейса)
 func recordBriefLog(message string) {
     logMutex.Lock()
     defer logMutex.Unlock()
@@ -65,21 +65,15 @@ func recordBriefLog(message string) {
         Timestamp: time.Now(),
         Message:   message,
     }
-    briefLog = append(briefLog, entry)
     fullHistoryLog = append(fullHistoryLog, entry)
 
-    // Ограничение размера краткого лога (например, 50 записей)
-    if len(briefLog) > 50 {
-        briefLog = briefLog[len(briefLog)-50:]
-    }
-    
     // Ограничение размера полного лога (500 записей)
     if len(fullHistoryLog) > 500 {
         fullHistoryLog = fullHistoryLog[len(fullHistoryLog)-500:]
     }
     
-    // Записываем сообщение также в файл логов пользовательских сообщений
-    userMessageLogger.Printf("%s %s", entry.Timestamp.Format("2006-01-02 15:04:05"), entry.Message)
+	// Записываем сообщение также в файл логов пользовательских сообщений
+    userMessageLogger.Printf("%s %s", entry.Timestamp.Format("2006/01/02 15:04:05"), entry.Message)
 }
 
 // Функция логирования DEBUG
@@ -127,8 +121,14 @@ func GetBriefLog() []config.LogEntry {
     defer logMutex.Unlock()
     
     // Создаем копию лога, чтобы избежать гонок
-    logCopy := make([]config.LogEntry, len(briefLog))
-    copy(logCopy, briefLog)
+    // Для совместимости возвращаем последние 50 записей из fullHistoryLog
+    startIdx := 0
+    if len(fullHistoryLog) > 50 {
+        startIdx = len(fullHistoryLog) - 50
+    }
+    
+    logCopy := make([]config.LogEntry, len(fullHistoryLog[startIdx:]))
+    copy(logCopy, fullHistoryLog[startIdx:])
     
     return logCopy
 }
@@ -145,8 +145,8 @@ func GetFullHistoryLog() []config.LogEntry {
     return logCopy
 }
 
-// loadUserMessagesToBriefLog - Загрузка сообщений пользователю из файла в briefLog при запуске
-func loadUserMessagesToBriefLog(logFilePath string) {
+// loadUserMessagesToFullHistoryLog - Загрузка сообщений пользователю из файла в fullHistoryLog при запуске
+func loadUserMessagesToFullHistoryLog(logFilePath string) {
     file, err := os.Open(logFilePath)
     if err != nil {
         // Если файл не существует, просто возвращаемся
@@ -189,14 +189,8 @@ func loadUserMessagesToBriefLog(logFilePath string) {
     logMutex.Lock()
     defer logMutex.Unlock()
     
-    // Добавляем загруженные сообщения в оба лога
-    briefLog = append(briefLog, messages...)
+    // Добавляем загруженные сообщения в fullHistoryLog
     fullHistoryLog = append(fullHistoryLog, messages...)
-    
-    // Ограничиваем размер briefLog до 50 (для веб-интерфейса)
-    if len(briefLog) > 50 {
-        briefLog = briefLog[len(briefLog)-50:]
-    }
     
     // Ограничиваем размер fullHistoryLog до 500
     if len(fullHistoryLog) > 500 {
