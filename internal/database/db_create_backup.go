@@ -86,8 +86,9 @@ func StartBackup(db *sql.DB, dbName string, smbSharePath string) error {
 
 		_, err = db.Exec(backupQuery)
 		
-		if err != nil {
+			if err != nil {
 			logging.LogError(fmt.Sprintf("Ошибка создания бэкапа базы '%s': %v", dbName, err))
+			logging.LogWebError(fmt.Sprintf("Ошибка создания бэкапа базы '%s': %v", dbName, err))
 			BackupProgressesMutex.Lock()
 			if progress := BackupProgresses[dbName]; progress != nil {
 				progress.Status = "failed"

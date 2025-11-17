@@ -27,8 +27,11 @@ func DeleteDatabase(db *sql.DB, dbName string) error {
 	// Перевод в SINGLE_USER не требуется, так как база не используется во время восстановления.
 	deleteQuery := fmt.Sprintf("DROP DATABASE [%s]", dbName)
 	if _, err := db.Exec(deleteQuery); err != nil {
+		logging.LogWebError(fmt.Sprintf("Ошибка удаления базы данных %s: %v", dbName, err))
 		return fmt.Errorf("ошибка DROP DATABASE для БД %s: %w", dbName, err)
 	}
+	
+	logging.LogWebInfo(fmt.Sprintf("База данных '%s' успешно удалена", dbName))
 	
 	return nil
 }

@@ -388,11 +388,13 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 		}
 		
 		logging.LogInfo(fmt.Sprintf("Процесс восстановления базы данных '%s' завершен.", newDBName))
+		logging.LogWebInfo(fmt.Sprintf("Восстановление базы '%s' успешно завершено", newDBName))
 		
 		// Переводим базу данных на модель простого восстановления
 		alterRecoveryModelQuery := fmt.Sprintf("ALTER DATABASE [%s] SET RECOVERY SIMPLE", newDBName)
 		if _, err := db.Exec(alterRecoveryModelQuery); err != nil {
 			logging.LogError(fmt.Sprintf("Ошибка при изменении модели восстановления для базы '%s': %v", newDBName, err))
+			logging.LogWebError(fmt.Sprintf("Ошибка изменения модели восстановления для базы '%s': %v", newDBName, err))
 			// Обновляем статус на "failed", несмотря на успешное восстановление
 			RestoreProgressesMutex.Lock()
 			if progress != nil {
@@ -407,8 +409,9 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 		logging.LogInfo(fmt.Sprintf("Модель восстановления для базы данных '%s' изменена на SIMPLE.", newDBName))
 		
 		// Переводим базу в многопользовательский режим после завершения восстановления
-		if err := SetMultiUserMode(db, newDBName); err != nil {
+	if err := SetMultiUserMode(db, newDBName); err != nil {
 			logging.LogError(fmt.Sprintf("Ошибка перевода базы '%s' в многопользовательский режим после восстановления: %v", newDBName, err))
+			logging.LogWebError(fmt.Sprintf("Ошибка перевода базы '%s' в многопользовательский режим после восстановления: %v", newDBName, err))
 			// Обновляем статус на "failed", несмотря на успешное восстановление
 			RestoreProgressesMutex.Lock()
 			if progress != nil {
@@ -418,7 +421,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			}
 			RestoreProgressesMutex.Unlock()
 			return
-		}
+	}
 		
 		RestoreProgressesMutex.Lock()
 		if progress != nil {
@@ -427,7 +430,7 @@ func StartRestore(db *sql.DB, backupBaseName, newDBName string, restoreTime *tim
 			progress.Percentage = 100
 			progress.EndTime = time.Now()
 		}
-		RestoreProgressesMutex.Unlock()
+	RestoreProgressesMutex.Unlock()
 
 	}(ctx, cancel) // Передаем контекст и функцию отмены в горутину
 

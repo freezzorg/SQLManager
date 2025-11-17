@@ -106,7 +106,7 @@ func (h *AppHandlers) HandleGetDatabases(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		logging.LogWebError(fmt.Sprintf("Не удалось получить список баз данных: %v", err))
 		http.Error(w, "Ошибка сервера при получении списка баз данных", http.StatusInternalServerError)
-		return
+	return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -139,7 +139,7 @@ func (h *AppHandlers) HandleDeleteDatabase(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.WriteHeader(http.StatusOK)
-	logging.LogWebInfo(fmt.Sprintf("База данных '%s' успешно удалена.", dbName))
+	// Сообщение об успешном удалении теперь генерируется внутри функции DeleteDatabase
 	json.NewEncoder(w).Encode(map[string]string{"message": fmt.Sprintf("База данных '%s' успешно удалена.", dbName)})
 }
 
@@ -353,7 +353,7 @@ func (h *AppHandlers) HandleGetLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	logEntries := logging.GetBriefLog()
+	logEntries := logging.GetFullHistoryLog()
 	json.NewEncoder(w).Encode(logEntries)
 }
 
