@@ -2,8 +2,8 @@ body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: 
 #container { display: flex; flex-direction: column; width: 100%; margin: 0 auto; height: 100vh; } /* Ширина 100%, высота 100vh */
 #main { display: flex; flex: 1; }
 #left-frame, #right-frame { border: 1px solid #b3ac86; border-radius: 5px; background-color: #fffbf0; margin: 5px; padding: 10px; } /* Цвет бордюра и цвет фона фреймов */
-#left-frame { width: 450px; flex-shrink: 0; height: 440px; display: flex; flex-direction: column; overflow-x: hidden; } /* Фиксированная высота */
-#right-frame { width: calc(100% - 450px); flex-grow: 1; height: 440px; display: flex; flex-direction: column; } /* Фиксированная высота */
+#left-frame { width: 450px; flex-shrink: 0; height: 540px; display: flex; flex-direction: column; overflow-x: hidden; } /* Фиксированная высота */
+#right-frame { width: calc(100% - 450px); flex-grow: 1; height: 540px; display: flex; flex-direction: column; } /* Фиксированная высота */
 #bottom-frame { flex: 1; border: 1px solid #b3ac86; border-radius: 5px; background-color: #fffbf0; margin: 5px; padding: 10px; overflow-y: auto; } /* Цвет бордюра и цвет фона фреймов, динамическая высота */
 h2 { margin: 0 0 20px 0; font-weight: bold; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
 ul { list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
@@ -22,6 +22,12 @@ li {
 }
 li:hover { background-color: #f5f5f5; }
 li.selected { background-color: #d1e7ff; }
+
+#backup-end-times {
+    height: 178px; /* 17px * 10 строк + 8px = 178px */
+    max-height: 178px;
+    min-height: 178px;
+}
 
 .db-name {
     flex-grow: 1; /* Занимает доступное пространство */
