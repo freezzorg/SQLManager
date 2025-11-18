@@ -160,10 +160,8 @@ select, input[type="text"], input[type="datetime-local"] { width: 100%; padding:
 .status-unknown { background-color: #2196F3; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-/* Добавляем определение для fa-spin анимации */
-.fa-spin {
-  animation: fa-spin 2s infinite linear;
-}
+/* Оригинальное определение для fa-spin анимации из Font Awesome */
+.fa-spin { display: inline-block; animation: fa-spin 2s infinite linear !important; }
 
 @keyframes fa-spin {
   0% {
